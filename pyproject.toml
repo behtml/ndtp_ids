@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ndtp_ids"
+version = "0.1.0"
+description = "Network Data Traffic Processing Intrusion Detection System - Packet Collector Module"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "NDTP IDS Team"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: System :: Networking :: Monitoring",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "scapy>=2.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/behtml/ndtp_ids"
+Repository = "https://github.com/behtml/ndtp_ids"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+ndtp-collector = "ndtp_ids.packet_collector:start_collector"
