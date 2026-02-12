@@ -47,46 +47,66 @@ class AnomalyDetector:
         self.init_database()
         
     def init_database(self):
-        """Инициализация таблицы для алертов"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS alerts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp REAL NOT NULL,
-                src_ip TEXT NOT NULL,
-                anomaly_type TEXT NOT NULL,
-                score REAL NOT NULL,
-                current_value REAL,
-                mean_value REAL,
-                std_value REAL,
-                threshold REAL,
-                severity TEXT,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Таблица для базовых профилей хостов
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS host_profiles (
-                src_ip TEXT PRIMARY KEY,
-                connections_mean REAL,
-                connections_std REAL,
-                unique_ports_mean REAL,
-                unique_ports_std REAL,
-                unique_dst_ips_mean REAL,
-                unique_dst_ips_std REAL,
-                total_bytes_mean REAL,
-                total_bytes_std REAL,
-                sample_count INTEGER,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
+        """Инициализация таблиц для профилей устройств и алертов"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Таблица для профилей устройств
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS device_profiles (
+                    src_ip TEXT NOT NULL,
+                    metric_name TEXT NOT NULL,
+                    mean REAL DEFAULT 0.0,
+                    std REAL DEFAULT 0.0,
+                    min_value REAL,
+                    max_value REAL,
+                    sample_count INTEGER DEFAULT 0,
+                    last_updated REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (src_ip, metric_name)
+                )
+            ''')
+            
+            # Таблица для алертов
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    src_ip TEXT NOT NULL,
+                    anomaly_type TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    severity TEXT NOT NULL,
+                    description TEXT,
+                    metric_value REAL,
+                    baseline_mean REAL,
+                    baseline_std REAL,
+                    resolved BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Создаем индексы для alerts
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_alerts_timestamp 
+                ON alerts(timestamp)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_alerts_src_ip 
+                ON alerts(src_ip)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_alerts_severity 
+                ON alerts(severity)
+            ''')
+            
+            conn.commit()
+            conn.close()
+            print("[AnomalyDetector] Database initialized successfully", file=sys.stderr)
+        except Exception as e:
+            print(f"[AnomalyDetector] Error initializing database: {e}", file=sys.stderr)
     
     def calculate_statistics(self, src_ip: str, metric: str) -> Tuple[float, float, int]:
         """
@@ -114,14 +134,14 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Теперь безопасно использовать metric в запросе
-        cursor.execute(f'''
-            SELECT {metric}
+        # Используем новую схему с metric_name и metric_value
+        cursor.execute('''
+            SELECT metric_value
             FROM aggregated_metrics
-            WHERE src_ip = ?
-            ORDER BY window_start DESC
+            WHERE src_ip = ? AND metric_name = ?
+            ORDER BY timestamp DESC
             LIMIT 50
-        ''', (src_ip,))
+        ''', (src_ip, metric))
         
         values = [row[0] for row in cursor.fetchall()]
         conn.close()
@@ -257,20 +277,20 @@ class AnomalyDetector:
         
         cursor.execute('''
             INSERT INTO alerts
-            (timestamp, src_ip, anomaly_type, score, current_value, mean_value,
-             std_value, threshold, severity, description)
+            (timestamp, src_ip, anomaly_type, score, severity, description,
+             metric_value, baseline_mean, baseline_std, resolved)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             alert.timestamp,
             alert.src_ip,
             alert.anomaly_type,
             alert.score,
+            alert.severity,
+            alert.description,
             alert.current_value,
             alert.mean_value,
             alert.std_value,
-            alert.threshold,
-            alert.severity,
-            alert.description
+            0  # resolved = False по умолчанию
         ))
         
         conn.commit()
@@ -278,7 +298,7 @@ class AnomalyDetector:
     
     def update_host_profile(self, src_ip: str):
         """
-        Обновление профиля хоста (базовых статистик)
+        Обновление профиля устройства (базовых статистик)
         
         Args:
             src_ip: IP адрес хоста
@@ -290,35 +310,39 @@ class AnomalyDetector:
             'total_bytes'
         ]
         
-        profile = {'src_ip': src_ip, 'sample_count': 0}
-        
-        for metric in metrics:
-            mean, std, count = self.calculate_statistics(src_ip, metric)
-            profile[f'{metric}_mean'] = mean
-            profile[f'{metric}_std'] = std
-            profile['sample_count'] = count
-        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('''
-            INSERT OR REPLACE INTO host_profiles
-            (src_ip, connections_mean, connections_std, unique_ports_mean, unique_ports_std,
-             unique_dst_ips_mean, unique_dst_ips_std, total_bytes_mean, total_bytes_std,
-             sample_count, last_updated)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (
-            profile['src_ip'],
-            profile['connections_count_mean'],
-            profile['connections_count_std'],
-            profile['unique_ports_mean'],
-            profile['unique_ports_std'],
-            profile['unique_dst_ips_mean'],
-            profile['unique_dst_ips_std'],
-            profile['total_bytes_mean'],
-            profile['total_bytes_std'],
-            profile['sample_count']
-        ))
+        # Обновляем профиль для каждой метрики в нормализованном формате
+        for metric_name in metrics:
+            mean, std, count = self.calculate_statistics(src_ip, metric_name)
+            
+            # Получаем min и max значения для этой метрики
+            cursor.execute('''
+                SELECT MIN(metric_value), MAX(metric_value)
+                FROM aggregated_metrics
+                WHERE src_ip = ? AND metric_name = ?
+            ''', (src_ip, metric_name))
+            
+            row = cursor.fetchone()
+            min_value = row[0] if row and row[0] is not None else 0.0
+            max_value = row[1] if row and row[1] is not None else 0.0
+            
+            # Вставляем или обновляем профиль для этой метрики
+            cursor.execute('''
+                INSERT OR REPLACE INTO device_profiles
+                (src_ip, metric_name, mean, std, min_value, max_value, sample_count, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                src_ip,
+                metric_name,
+                mean,
+                std,
+                min_value,
+                max_value,
+                count,
+                datetime.now().timestamp()
+            ))
         
         conn.commit()
         conn.close()
@@ -376,46 +400,48 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Получаем последние метрики для каждого хоста
+        # Получаем последние окна для каждого хоста
         cursor.execute('''
-            SELECT DISTINCT src_ip
+            SELECT DISTINCT src_ip, window_start, window_end
             FROM aggregated_metrics
+            WHERE (src_ip, timestamp) IN (
+                SELECT src_ip, MAX(timestamp)
+                FROM aggregated_metrics
+                GROUP BY src_ip
+            )
         ''')
         
-        hosts = [row[0] for row in cursor.fetchall()]
+        windows = cursor.fetchall()
         
-        for src_ip in hosts:
-            # Получаем последнюю метрику для хоста
+        for src_ip, window_start, window_end in windows:
+            # Получаем все метрики для этого окна
             cursor.execute('''
-                SELECT window_start, window_end, connections_count, unique_ports,
-                       unique_dst_ips, total_bytes, avg_packet_size
+                SELECT metric_name, metric_value
                 FROM aggregated_metrics
-                WHERE src_ip = ?
-                ORDER BY window_start DESC
-                LIMIT 1
-            ''', (src_ip,))
-            
-            row = cursor.fetchone()
-            if not row:
-                continue
+                WHERE src_ip = ? AND window_start = ?
+            ''', (src_ip, window_start))
             
             window_data = {
                 'src_ip': src_ip,
-                'window_start': row[0],
-                'window_end': row[1],
-                'connections_count': row[2],
-                'unique_ports': row[3],
-                'unique_dst_ips': row[4],
-                'total_bytes': row[5],
-                'avg_packet_size': row[6]
+                'window_start': window_start,
+                'window_end': window_end
             }
+            
+            # Заполняем данные метрик
+            for metric_name, metric_value in cursor.fetchall():
+                window_data[metric_name] = metric_value
+            
+            # Проверяем что у нас есть необходимые метрики
+            required_metrics = ['connections_count', 'unique_ports', 'unique_dst_ips', 'total_bytes']
+            if not all(m in window_data for m in required_metrics):
+                continue
             
             # Анализируем на аномалии
             alerts = self.analyze_window(window_data)
             
             for alert in alerts:
                 self.save_alert(alert)
-                print(f"[ALERT] {alert.severity.upper()}: {alert.description}")
+                print(f"[ALERT] {alert.severity.upper()}: {alert.description}", file=sys.stderr)
             
             # Обновляем профиль хоста
             self.update_host_profile(src_ip)
