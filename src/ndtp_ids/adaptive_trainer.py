@@ -49,6 +49,7 @@ class AdaptiveTrainer:
         learning_window: int = 100,  # Количество наблюдений для обучения
         ewma_alpha: float = 0.1,  # Коэффициент сглаживания (0.05-0.2)
         sliding_window_size: int = 50,  # Размер скользящего окна
+        min_std_deviation: float = 0.01,  # Минимальное значение std для избежания деления на 0
     ):
         """
         Инициализация тренера
@@ -58,11 +59,13 @@ class AdaptiveTrainer:
             learning_window: Количество наблюдений для начального обучения
             ewma_alpha: Коэффициент для экспоненциального сглаживания
             sliding_window_size: Размер скользящего окна для пересчета baseline
+            min_std_deviation: Минимальное стандартное отклонение
         """
         self.db_path = db_path
         self.learning_window = learning_window
         self.ewma_alpha = ewma_alpha
         self.sliding_window_size = sliding_window_size
+        self.min_std_deviation = min_std_deviation
         self.init_database()
         
     def init_database(self):
@@ -254,10 +257,10 @@ class AdaptiveTrainer:
         # Вычисляем среднее и стандартное отклонение
         def calc_stats(values):
             if not values:
-                return 0.0, 0.0
+                return 0.0, self.min_std_deviation
             mean = sum(values) / len(values)
             variance = sum((x - mean) ** 2 for x in values) / len(values)
-            std = math.sqrt(variance) if variance > 0 else 0.01
+            std = math.sqrt(variance) if variance > 0 else self.min_std_deviation
             return mean, std
             
         conn_mean, conn_std = calc_stats(conn_vals)

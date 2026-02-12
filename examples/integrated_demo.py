@@ -225,7 +225,7 @@ def demo_web_interface_info():
     print()
     print("Или с помощью скрипта:")
     print()
-    print("  cd /home/runner/work/ndtp_ids/ndtp_ids")
+    print("  cd ndtp_ids")
     print("  python src/ndtp_ids/web_interface.py")
     print()
     print("После запуска откройте в браузере:")

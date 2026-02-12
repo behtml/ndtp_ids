@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Инициализация Flask приложения
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'ndtp-ids-secret-key-change-in-production'
+# Security: Use environment variable for SECRET_KEY in production
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ndtp-ids-secret-key-change-in-production')
 
 # Глобальные переменные для компонентов системы
 DB_PATH = "ndtp_ids.db"
@@ -346,12 +347,14 @@ def training():
     return render_template('training.html')
 
 
-def start_web_interface(host='0.0.0.0', port=5000, debug=False, db_path="ndtp_ids.db"):
+def start_web_interface(host='127.0.0.1', port=5000, debug=False, db_path="ndtp_ids.db"):
     """
     Запуск веб-интерфейса
     
     Args:
-        host: Хост для прослушивания (по умолчанию 0.0.0.0 - все интерфейсы)
+        host: Хост для прослушивания
+              '127.0.0.1' - только локальный доступ (рекомендуется)
+              '0.0.0.0' - доступ со всех интерфейсов (ВНИМАНИЕ: небезопасно в публичных сетях)
         port: Порт для прослушивания
         debug: Режим отладки Flask
         db_path: Путь к базе данных
@@ -377,7 +380,8 @@ if __name__ == "__main__":
     )
     
     parser = argparse.ArgumentParser(description='NDTP IDS Web Interface')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to listen on')
+    parser.add_argument('--host', default='127.0.0.1', 
+                       help='Host to listen on (default: 127.0.0.1 for local only, use 0.0.0.0 for all interfaces)')
     parser.add_argument('--port', type=int, default=5000, help='Port to listen on')
     parser.add_argument('--db', default='ndtp_ids.db', help='Database path')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
