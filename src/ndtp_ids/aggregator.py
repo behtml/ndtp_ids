@@ -38,43 +38,61 @@ class MetricsAggregator:
         
     def init_database(self):
         """Инициализация базы данных"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Таблица для агрегированных метрик
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS aggregated_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                window_start REAL NOT NULL,
-                window_end REAL NOT NULL,
-                src_ip TEXT NOT NULL,
-                connections_count INTEGER,
-                unique_ports INTEGER,
-                unique_dst_ips INTEGER,
-                total_bytes INTEGER,
-                avg_packet_size REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Таблица для хранения необработанных событий
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS raw_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp REAL NOT NULL,
-                src_ip TEXT NOT NULL,
-                dst_ip TEXT NOT NULL,
-                src_port INTEGER,
-                dst_port INTEGER,
-                protocol TEXT,
-                packet_size INTEGER,
-                direction TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Таблица для агрегированных метрик (расширенная схема)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS aggregated_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    src_ip TEXT NOT NULL,
+                    metric_name TEXT NOT NULL,
+                    metric_value REAL NOT NULL,
+                    window_start REAL,
+                    window_end REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Создаем индексы для aggregated_metrics
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_metrics_timestamp 
+                ON aggregated_metrics(timestamp)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_metrics_src_ip 
+                ON aggregated_metrics(src_ip)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_metrics_name 
+                ON aggregated_metrics(metric_name)
+            ''')
+            
+            # Таблица для хранения необработанных событий
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS raw_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    src_ip TEXT NOT NULL,
+                    dst_ip TEXT NOT NULL,
+                    src_port INTEGER,
+                    dst_port INTEGER,
+                    protocol TEXT,
+                    packet_size INTEGER,
+                    direction TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            conn.commit()
+            conn.close()
+            print("[Aggregator] Database initialized successfully", file=sys.stderr)
+        except Exception as e:
+            print(f"[Aggregator] Error initializing database: {e}", file=sys.stderr)
         
     def get_window_key(self, timestamp: float) -> float:
         """
@@ -184,21 +202,26 @@ class MetricsAggregator:
             if window_data['packet_count'] > 0 else 0
         )
         
-        cursor.execute('''
-            INSERT INTO aggregated_metrics
-            (window_start, window_end, src_ip, connections_count, unique_ports, 
-             unique_dst_ips, total_bytes, avg_packet_size)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            window_data['window_start'],
-            window_data['window_end'],
-            window_data['src_ip'],
-            window_data['connections'],
-            len(window_data['ports']),
-            len(window_data['dst_ips']),
-            window_data['total_bytes'],
-            avg_packet_size
-        ))
+        # Используем новую нормализованную схему - одна строка на метрику
+        timestamp = window_data['window_end']
+        src_ip = window_data['src_ip']
+        window_start = window_data['window_start']
+        window_end = window_data['window_end']
+        
+        metrics = [
+            ('connections_count', window_data['connections']),
+            ('unique_ports', len(window_data['ports'])),
+            ('unique_dst_ips', len(window_data['dst_ips'])),
+            ('total_bytes', window_data['total_bytes']),
+            ('avg_packet_size', avg_packet_size)
+        ]
+        
+        for metric_name, metric_value in metrics:
+            cursor.execute('''
+                INSERT INTO aggregated_metrics
+                (timestamp, src_ip, metric_name, metric_value, window_start, window_end)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (timestamp, src_ip, metric_name, metric_value, window_start, window_end))
         
         conn.commit()
         conn.close()
@@ -206,7 +229,7 @@ class MetricsAggregator:
         print(f"[Aggregator] Saved metrics for {window_data['src_ip']}: "
               f"{window_data['connections']} connections, "
               f"{len(window_data['ports'])} unique ports, "
-              f"{len(window_data['dst_ips'])} unique destinations")
+              f"{len(window_data['dst_ips'])} unique destinations", file=sys.stderr)
     
     def flush_all(self):
         """Принудительное сохранение всех текущих окон"""
@@ -223,15 +246,15 @@ class MetricsAggregator:
             limit: Максимальное количество записей
             
         Returns:
-            Список метрик
+            Список метрик (сгруппированных по окнам)
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Получаем уникальные окна
         if src_ip:
             cursor.execute('''
-                SELECT window_start, window_end, src_ip, connections_count,
-                       unique_ports, unique_dst_ips, total_bytes, avg_packet_size
+                SELECT DISTINCT window_start, window_end, src_ip
                 FROM aggregated_metrics
                 WHERE src_ip = ?
                 ORDER BY window_start DESC
@@ -239,29 +262,35 @@ class MetricsAggregator:
             ''', (src_ip, limit))
         else:
             cursor.execute('''
-                SELECT window_start, window_end, src_ip, connections_count,
-                       unique_ports, unique_dst_ips, total_bytes, avg_packet_size
+                SELECT DISTINCT window_start, window_end, src_ip
                 FROM aggregated_metrics
                 ORDER BY window_start DESC
                 LIMIT ?
             ''', (limit,))
         
-        rows = cursor.fetchall()
-        conn.close()
+        windows = cursor.fetchall()
         
         metrics = []
-        for row in rows:
-            metrics.append({
-                'window_start': row[0],
-                'window_end': row[1],
-                'src_ip': row[2],
-                'connections_count': row[3],
-                'unique_ports': row[4],
-                'unique_dst_ips': row[5],
-                'total_bytes': row[6],
-                'avg_packet_size': row[7]
-            })
+        for window_start, window_end, window_src_ip in windows:
+            # Получаем все метрики для этого окна
+            cursor.execute('''
+                SELECT metric_name, metric_value
+                FROM aggregated_metrics
+                WHERE window_start = ? AND src_ip = ?
+            ''', (window_start, window_src_ip))
+            
+            metric_dict = {
+                'window_start': window_start,
+                'window_end': window_end,
+                'src_ip': window_src_ip
+            }
+            
+            for metric_name, metric_value in cursor.fetchall():
+                metric_dict[metric_name] = metric_value
+            
+            metrics.append(metric_dict)
         
+        conn.close()
         return metrics
 
 
