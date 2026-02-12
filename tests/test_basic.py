@@ -154,6 +154,11 @@ class TestAnomalyDetector(unittest.TestCase):
         """Тест z-score при нулевом отклонении"""
         z_score = self.detector.calculate_z_score(100, 100, 0)
         self.assertEqual(z_score, 0.0)
+    
+    def test_invalid_metric_name(self):
+        """Тест валидации имени метрики (защита от SQL injection)"""
+        with self.assertRaises(ValueError):
+            self.detector.calculate_statistics("192.168.1.1", "invalid_metric; DROP TABLE alerts;--")
 
 
 class TestIntegration(unittest.TestCase):

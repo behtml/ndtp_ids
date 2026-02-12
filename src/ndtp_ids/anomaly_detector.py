@@ -99,9 +99,22 @@ class AnomalyDetector:
         Returns:
             Кортеж (mean, std, count)
         """
+        # Whitelist разрешенных метрик для предотвращения SQL injection
+        ALLOWED_METRICS = {
+            'connections_count',
+            'unique_ports',
+            'unique_dst_ips',
+            'total_bytes',
+            'avg_packet_size'
+        }
+        
+        if metric not in ALLOWED_METRICS:
+            raise ValueError(f"Invalid metric: {metric}. Allowed: {ALLOWED_METRICS}")
+        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Теперь безопасно использовать metric в запросе
         cursor.execute(f'''
             SELECT {metric}
             FROM aggregated_metrics
