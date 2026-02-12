@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NDTP IDS - Правила Suricata</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
+    <h1>Правила Suricata</h1>
+    <a href="/">← Назад</a>
+    <div id="rules-list" style="margin-top: 20px;"></div>
+    <script>
+        fetch('/api/suricata/rules').then(r => r.json()).then(data => {
+            document.getElementById('rules-list').innerHTML = `
+                <div style="background: white; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
+                    <h3>Всего правил: ${data.count}</h3>
+                </div>
+                ${data.rules.map(r => 
+                    `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                        <strong>SID ${r.sid}:</strong> ${r.msg}
+                        <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                            ${r.action} ${r.protocol} ${r.src_ip}:${r.src_port} → ${r.dst_ip}:${r.dst_port}
+                        </div>
+                    </div>`
+                ).join('')}
+            `;
+        });
+    </script>
+</body>
+</html>

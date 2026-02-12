@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NDTP IDS - Алерты</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
+    <h1>Список алертов</h1>
+    <a href="/">← Назад</a>
+    <div id="alerts-list" style="margin-top: 20px;"></div>
+    <script>
+        fetch('/api/alerts?limit=50').then(r => r.json()).then(data => {
+            document.getElementById('alerts-list').innerHTML = data.alerts.map(a => 
+                `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #e74c3c;">
+                    <div>${new Date(a.timestamp).toLocaleString()}</div>
+                    <strong>${a.src_ip}</strong> - ${a.anomaly_type}
+                    <div>${a.description}</div>
+                    <div>Score: ${a.score} | Severity: ${a.severity}</div>
+                </div>`
+            ).join('');
+        });
+    </script>
+</body>
+</html>

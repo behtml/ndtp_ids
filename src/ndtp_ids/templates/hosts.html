@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NDTP IDS - Хосты</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
+    <h1>Список отслеживаемых хостов</h1>
+    <a href="/">← Назад</a>
+    <div id="hosts-list" style="margin-top: 20px;"></div>
+    <script>
+        fetch('/api/hosts').then(r => r.json()).then(data => {
+            document.getElementById('hosts-list').innerHTML = data.hosts.map(h => 
+                `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                    <strong>${h.src_ip}</strong> - ${h.is_learning ? 'Обучение' : 'Детекция'} 
+                    (${h.samples_count} наблюдений)
+                </div>`
+            ).join('');
+        });
+    </script>
+</body>
+</html>

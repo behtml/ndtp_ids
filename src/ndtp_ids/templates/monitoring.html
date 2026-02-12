@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NDTP IDS - Мониторинг в реальном времени</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ NDTP IDS</h1>
+        <p>Мониторинг в реальном времени</p>
+    </div>
+    
+    <div class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/monitoring" class="active">Мониторинг</a>
+        <a href="/hosts">Хосты</a>
+        <a href="/alerts">Алерты</a>
+        <a href="/rules">Правила Suricata</a>
+        <a href="/training">Обучение</a>
+    </div>
+    
+    <div class="container">
+        <div class="card">
+            <h2>🔴 Live Monitoring</h2>
+            <p style="color: #999; margin-bottom: 20px;">
+                Эта страница отображает события в реальном времени. 
+                Для полноценной реализации требуется WebSocket соединение.
+            </p>
+            <div id="live-events" style="font-family: monospace; font-size: 12px; max-height: 600px; overflow-y: auto; background: #f9f9f9; padding: 15px; border-radius: 5px;">
+                <div style="color: #999;">Ожидание событий...</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

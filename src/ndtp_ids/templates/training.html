@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NDTP IDS - Управление обучением</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
+    <h1>Управление режимом обучения</h1>
+    <a href="/">← Назад</a>
+    <div style="background: white; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h2>Статистика обучения</h2>
+        <div id="training-stats"></div>
+    </div>
+    <div id="hosts-training" style="margin-top: 20px;"></div>
+    <script>
+        function loadData() {
+            fetch('/api/stats').then(r => r.json()).then(data => {
+                document.getElementById('training-stats').innerHTML = `
+                    <p>Всего хостов: ${data.total_hosts}</p>
+                    <p>В режиме обучения: ${data.learning_hosts}</p>
+                    <p>В режиме детекции: ${data.detection_hosts}</p>
+                `;
+            });
+            
+            fetch('/api/hosts').then(r => r.json()).then(data => {
+                document.getElementById('hosts-training').innerHTML = data.hosts.map(h => 
+                    `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                        <strong>${h.src_ip}</strong>
+                        <span style="color: ${h.is_learning ? '#f39c12' : '#2ecc71'};">
+                            ${h.is_learning ? '🟡 Обучение' : '🟢 Детекция'}
+                        </span>
+                        <div style="margin-top: 10px;">
+                            Наблюдений: ${h.samples_count} | 
+                            Соединений (среднее): ${h.connections_mean}
+                        </div>
+                    </div>`
+                ).join('');
+            });
+        }
+        loadData();
+        setInterval(loadData, 5000);
+    </script>
+</body>
+</html>
