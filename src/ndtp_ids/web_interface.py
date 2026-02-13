@@ -15,6 +15,7 @@ try:
     from .anomaly_detector import AnomalyDetector
     from .adaptive_trainer import AdaptiveTrainer
     from .suricata_rules import SuricataRuleParser, DEFAULT_RULES
+    from .suricata_engine import SuricataEngine
 except ImportError:
     # Для запуска как standalone скрипт
     import sys
@@ -22,6 +23,7 @@ except ImportError:
     from anomaly_detector import AnomalyDetector
     from adaptive_trainer import AdaptiveTrainer
     from suricata_rules import SuricataRuleParser, DEFAULT_RULES
+    from suricata_engine import SuricataEngine
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +37,23 @@ DB_PATH = "ndtp_ids.db"
 detector = None
 trainer = None
 rule_parser = None
+suricata_engine = None
 
 
 def init_components():
     """Инициализация компонентов системы"""
-    global detector, trainer, rule_parser
+    global detector, trainer, rule_parser, suricata_engine
     
     detector = AnomalyDetector(db_path=DB_PATH)
     trainer = AdaptiveTrainer(db_path=DB_PATH)
     rule_parser = SuricataRuleParser()
     
-    # Загружаем базовые правила Suricata
+    # Загружаем базовые правила Suricata (в старый парсер для совместимости)
     rule_parser.load_rules_from_text(DEFAULT_RULES)
+    
+    # Инициализируем Suricata Engine с БД-хранилищем правил
+    suricata_engine = SuricataEngine(db_path=DB_PATH)
+    suricata_engine.load_default_rules()
     
     logger.info("Компоненты системы инициализированы")
 
@@ -457,22 +464,15 @@ def reset_host_profile(ip):
 
 @app.route('/api/suricata/rules')
 def get_suricata_rules():
-    """API: Получение списка правил Suricata"""
+    """API: Получение всех правил Suricata из БД"""
     try:
-        rules_data = []
-        for rule in rule_parser.rules:
-            rules_data.append({
-                'sid': rule.sid,
-                'action': rule.action,
-                'protocol': rule.protocol,
-                'msg': rule.msg,
-                'src_ip': rule.src_ip,
-                'src_port': rule.src_port,
-                'dst_ip': rule.dst_ip,
-                'dst_port': rule.dst_port
-            })
-            
-        return jsonify({'rules': rules_data, 'count': len(rules_data)})
+        rules = suricata_engine.get_all_rules()
+        counts = suricata_engine.get_rules_count()
+        return jsonify({
+            'rules': rules,
+            'count': counts['total'],
+            'active': counts['active']
+        })
     except Exception as e:
         logger.error(f"Ошибка при получении правил Suricata: {e}")
         return jsonify({'error': str(e)}), 500
@@ -480,27 +480,129 @@ def get_suricata_rules():
 
 @app.route('/api/suricata/rules', methods=['POST'])
 def add_suricata_rule():
-    """API: Добавление нового правила Suricata"""
+    """API: Добавление нового правила Suricata (сохраняется в БД)"""
     try:
         data = request.get_json()
         rule_text = data.get('rule', '')
+        category = data.get('category', 'custom')
         
-        rule = rule_parser.parse_rule(rule_text)
+        result = suricata_engine.add_rule(rule_text, category=category)
         
-        if rule:
-            rule_parser.rules.append(rule)
-            return jsonify({
-                'success': True,
-                'rule': {
-                    'sid': rule.sid,
-                    'msg': rule.msg
-                }
-            })
+        if result:
+            return jsonify({'success': True, 'rule': result})
         else:
-            return jsonify({'error': 'Invalid rule format'}), 400
-            
+            return jsonify({'error': 'Неверный формат правила. Пример: alert tcp any any -> any 80 (msg:"HTTP"; sid:2000001;)'}), 400
     except Exception as e:
         logger.error(f"Ошибка при добавлении правила: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rules/bulk', methods=['POST'])
+def add_suricata_rules_bulk():
+    """API: Массовое добавление правил (текст с несколькими правилами)"""
+    try:
+        data = request.get_json()
+        rules_text = data.get('rules', '')
+        category = data.get('category', 'custom')
+        
+        count = suricata_engine.add_rules_from_text(rules_text, category=category)
+        
+        return jsonify({'success': True, 'added': count})
+    except Exception as e:
+        logger.error(f"Ошибка при массовом добавлении правил: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rules/<int:sid>', methods=['DELETE'])
+def delete_suricata_rule(sid):
+    """API: Удаление правила по SID"""
+    try:
+        success = suricata_engine.delete_rule(sid)
+        if success:
+            return jsonify({'success': True, 'sid': sid})
+        else:
+            return jsonify({'error': f'Правило SID {sid} не найдено'}), 404
+    except Exception as e:
+        logger.error(f"Ошибка при удалении правила: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rules/<int:sid>/toggle', methods=['POST'])
+def toggle_suricata_rule(sid):
+    """API: Включение/выключение правила"""
+    try:
+        data = request.get_json()
+        enabled = data.get('enabled', True)
+        
+        success = suricata_engine.toggle_rule(sid, enabled)
+        if success:
+            return jsonify({'success': True, 'sid': sid, 'enabled': enabled})
+        else:
+            return jsonify({'error': f'Правило SID {sid} не найдено'}), 404
+    except Exception as e:
+        logger.error(f"Ошибка при переключении правила: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/alerts')
+def get_suricata_alerts():
+    """API: Получение алертов Suricata"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        severity = request.args.get('severity', None)
+        src_ip = request.args.get('src_ip', None)
+        
+        alerts = suricata_engine.get_recent_alerts(
+            limit=limit, severity=severity, src_ip=src_ip
+        )
+        
+        # Форматируем timestamp для UI
+        for alert in alerts:
+            alert['timestamp_fmt'] = datetime.fromtimestamp(
+                alert['timestamp']
+            ).strftime('%Y-%m-%d %H:%M:%S')
+        
+        return jsonify({'alerts': alerts, 'count': len(alerts)})
+    except Exception as e:
+        logger.error(f"Ошибка при получении алертов Suricata: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/alerts/stats')
+def get_suricata_alerts_stats():
+    """API: Статистика алертов Suricata"""
+    try:
+        stats = suricata_engine.get_alerts_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Ошибка при получении статистики: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/test', methods=['POST'])
+def test_suricata_packet():
+    """API: Тестовая проверка пакета по правилам (для отладки)"""
+    try:
+        packet = request.get_json()
+        
+        # Минимальная валидация
+        required = ['src_ip', 'dst_ip', 'protocol']
+        for field in required:
+            if field not in packet:
+                return jsonify({'error': f'Поле {field} обязательно'}), 400
+        
+        if 'timestamp' not in packet:
+            packet['timestamp'] = datetime.now().timestamp()
+        
+        alerts = suricata_engine.check_packet(packet)
+        
+        return jsonify({
+            'packet': packet,
+            'alerts': alerts,
+            'matched_rules': len(alerts)
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при тестировании пакета: {e}")
         return jsonify({'error': str(e)}), 500
 
 

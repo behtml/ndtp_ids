@@ -2,28 +2,690 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NDTP IDS - Правила Suricata</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5; color: #333;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 { font-size: 28px; margin-bottom: 5px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+        .nav {
+            background: white; padding: 15px 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px;
+        }
+        .nav a {
+            color: #667eea; text-decoration: none; margin-right: 25px;
+            font-weight: 500; transition: color 0.3s;
+        }
+        .nav a:hover { color: #764ba2; }
+        .nav a.active { color: #764ba2; border-bottom: 2px solid #764ba2; padding-bottom: 2px; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .card {
+            background: white; padding: 25px; border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 20px;
+        }
+        .card h2 {
+            margin-bottom: 20px; color: #333; font-size: 20px;
+            border-bottom: 2px solid #667eea; padding-bottom: 10px;
+        }
+
+        /* Stats */
+        .stats-row {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px; margin-bottom: 25px;
+        }
+        .stat-box {
+            text-align: center; padding: 18px; background: #f9f9fb;
+            border-radius: 8px; border-left: 4px solid #667eea;
+        }
+        .stat-box .val { font-size: 28px; font-weight: bold; color: #667eea; }
+        .stat-box .lbl { font-size: 12px; color: #888; margin-top: 4px; text-transform: uppercase; }
+        .stat-box.alert { border-left-color: #e74c3c; }
+        .stat-box.alert .val { color: #e74c3c; }
+        .stat-box.warn { border-left-color: #f39c12; }
+        .stat-box.warn .val { color: #f39c12; }
+        .stat-box.ok { border-left-color: #2ecc71; }
+        .stat-box.ok .val { color: #2ecc71; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid #e0e0e0; }
+        .tab {
+            padding: 12px 24px; cursor: pointer; background: #f5f5f5;
+            border: none; font-size: 14px; font-weight: 500; color: #666;
+            border-radius: 8px 8px 0 0; transition: all 0.2s;
+        }
+        .tab:hover { background: #e8e8e8; }
+        .tab.active { background: white; color: #667eea; border-bottom: 2px solid #667eea; margin-bottom: -2px; }
+        .tab-content { display: none; padding: 20px 0; }
+        .tab-content.active { display: block; }
+
+        /* Forms */
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: #555; }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%; padding: 10px 14px; border: 1px solid #ddd;
+            border-radius: 6px; font-size: 14px; font-family: inherit;
+        }
+        .form-group textarea { font-family: 'Consolas', 'Monaco', monospace; min-height: 120px; resize: vertical; }
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
+        }
+        .btn {
+            padding: 10px 24px; border: none; border-radius: 6px;
+            font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+        }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5a6fd6; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .btn-success { background: #2ecc71; color: white; }
+        .btn-success:hover { background: #27ae60; }
+        .btn-warning { background: #f39c12; color: white; }
+        .btn-warning:hover { background: #e67e22; }
+        .btn-outline {
+            background: transparent; border: 1px solid #ddd; color: #666;
+        }
+        .btn-outline:hover { border-color: #667eea; color: #667eea; }
+
+        /* Rules table */
+        .rules-table { width: 100%; border-collapse: collapse; }
+        .rules-table th {
+            text-align: left; padding: 12px; background: #f9f9fb;
+            font-size: 12px; text-transform: uppercase; color: #888;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .rules-table td {
+            padding: 10px 12px; border-bottom: 1px solid #f0f0f0;
+            font-size: 13px; vertical-align: middle;
+        }
+        .rules-table tr:hover { background: #fafafa; }
+        .rules-table .mono { font-family: 'Consolas', monospace; font-size: 12px; color: #555; }
+
+        /* Badges */
+        .badge {
+            display: inline-block; padding: 3px 8px; border-radius: 3px;
+            font-size: 11px; font-weight: bold; text-transform: uppercase;
+        }
+        .badge.critical { background: #e74c3c; color: white; }
+        .badge.high { background: #e67e22; color: white; }
+        .badge.medium { background: #f39c12; color: white; }
+        .badge.low { background: #3498db; color: white; }
+        .badge.enabled { background: #2ecc71; color: white; }
+        .badge.disabled { background: #95a5a6; color: white; }
+        .badge.default { background: #667eea; color: white; }
+        .badge.custom { background: #9b59b6; color: white; }
+        .badge.imported { background: #1abc9c; color: white; }
+        .badge.alert-action { background: #e74c3c; color: white; }
+        .badge.drop-action { background: #c0392b; color: white; }
+        .badge.pass-action { background: #2ecc71; color: white; }
+
+        /* Alert items */
+        .alert-item {
+            padding: 12px 15px; margin-bottom: 8px; border-radius: 5px;
+            border-left: 4px solid #e74c3c; background: #fff5f5;
+            display: flex; justify-content: space-between; align-items: flex-start;
+        }
+        .alert-item.medium { border-left-color: #f39c12; background: #fff9f0; }
+        .alert-item.high { border-left-color: #e67e22; background: #fff5ee; }
+        .alert-item .time { font-size: 11px; color: #999; }
+
+        /* Notification */
+        .notification {
+            position: fixed; top: 20px; right: 20px; padding: 15px 25px;
+            border-radius: 8px; color: white; font-weight: 500;
+            z-index: 1000; transform: translateX(400px); transition: transform 0.3s;
+        }
+        .notification.show { transform: translateX(0); }
+        .notification.success { background: #2ecc71; }
+        .notification.error { background: #e74c3c; }
+
+        .chart-container { position: relative; width: 100%; height: 250px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+        /* Syntax help */
+        .syntax-help {
+            background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 6px;
+            padding: 15px; margin-top: 10px; font-size: 13px;
+        }
+        .syntax-help code {
+            background: #e8e8e8; padding: 2px 6px; border-radius: 3px;
+            font-family: 'Consolas', monospace; font-size: 12px;
+        }
+        .syntax-help pre {
+            background: #2d2d2d; color: #f0f0f0; padding: 12px;
+            border-radius: 4px; margin: 8px 0; overflow-x: auto;
+            font-size: 12px; line-height: 1.6;
+        }
+
+        /* Test packet */
+        .test-result {
+            margin-top: 15px; padding: 15px; border-radius: 6px;
+            background: #f8f9fa; border: 1px solid #e0e0e0;
+        }
+        .test-result.match { border-color: #e74c3c; background: #fff5f5; }
+        .test-result.no-match { border-color: #2ecc71; background: #f0fff4; }
+
+        @media (max-width: 768px) {
+            .grid-2 { grid-template-columns: 1fr; }
+            .stats-row { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
 </head>
-<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
-    <h1>Правила Suricata</h1>
-    <a href="/">← Назад</a>
-    <div id="rules-list" style="margin-top: 20px;"></div>
-    <script>
-        fetch('/api/suricata/rules').then(r => r.json()).then(data => {
-            document.getElementById('rules-list').innerHTML = `
-                <div style="background: white; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
-                    <h3>Всего правил: ${data.count}</h3>
+<body>
+    <div class="header">
+        <h1>🛡️ NDTP IDS</h1>
+        <p>Управление правилами Suricata</p>
+    </div>
+
+    <div class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/monitoring">Мониторинг</a>
+        <a href="/hosts">Хосты</a>
+        <a href="/alerts">Алерты</a>
+        <a href="/rules" class="active">Правила Suricata</a>
+        <a href="/training">Обучение</a>
+    </div>
+
+    <div class="container">
+        <!-- Статистика -->
+        <div class="stats-row">
+            <div class="stat-box ok">
+                <div class="val" id="s-total">-</div>
+                <div class="lbl">Всего правил</div>
+            </div>
+            <div class="stat-box">
+                <div class="val" id="s-active">-</div>
+                <div class="lbl">Активных</div>
+            </div>
+            <div class="stat-box alert">
+                <div class="val" id="s-alerts-total">-</div>
+                <div class="lbl">Алертов всего</div>
+            </div>
+            <div class="stat-box warn">
+                <div class="val" id="s-alerts-hour">-</div>
+                <div class="lbl">За последний час</div>
+            </div>
+        </div>
+
+        <!-- Табы -->
+        <div class="card" style="padding-bottom: 0;">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('rules')">📋 Правила</button>
+                <button class="tab" onclick="switchTab('add')">➕ Добавить правило</button>
+                <button class="tab" onclick="switchTab('bulk')">📥 Массовый импорт</button>
+                <button class="tab" onclick="switchTab('test')">🧪 Тест пакета</button>
+                <button class="tab" onclick="switchTab('alerts')">🚨 Алерты Suricata</button>
+            </div>
+        </div>
+
+        <!-- Вкладка: Список правил -->
+        <div class="tab-content active" id="tab-rules">
+            <div class="card">
+                <h2>📋 Активные правила Suricata</h2>
+                <div id="rules-table-container">
+                    <p style="color: #999; text-align: center; padding: 30px;">Загрузка...</p>
                 </div>
-                ${data.rules.map(r => 
-                    `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px;">
-                        <strong>SID ${r.sid}:</strong> ${r.msg}
-                        <div style="font-size: 12px; color: #666; margin-top: 5px;">
-                            ${r.action} ${r.protocol} ${r.src_ip}:${r.src_port} → ${r.dst_ip}:${r.dst_port}
+            </div>
+        </div>
+
+        <!-- Вкладка: Добавить одно правило -->
+        <div class="tab-content" id="tab-add">
+            <div class="card">
+                <h2>➕ Добавить новое правило</h2>
+
+                <div class="form-group">
+                    <label>Правило Suricata (полный синтаксис):</label>
+                    <textarea id="new-rule" placeholder='alert tcp any any -> any 80 (msg:"HTTP Request"; sid:2000001;)'></textarea>
+                </div>
+
+                <button class="btn btn-primary" onclick="addRule()">Добавить правило</button>
+
+                <div class="syntax-help" style="margin-top: 20px;">
+                    <strong>📘 Синтаксис правил Suricata:</strong>
+                    <pre>action protocol src_ip src_port -> dst_ip dst_port (options)</pre>
+
+                    <p><strong>action:</strong> <code>alert</code> — уведомить, <code>drop</code> — заблокировать, <code>pass</code> — пропустить</p>
+                    <p><strong>protocol:</strong> <code>tcp</code>, <code>udp</code>, <code>icmp</code>, <code>ip</code></p>
+                    <p><strong>IP/порт:</strong> <code>any</code> — любой, конкретный IP (192.168.1.1), порт (80), диапазон ([1024:65535])</p>
+                    <p><strong>direction:</strong> <code>-></code> (однонаправленное), <code><></code> (оба направления)</p>
+                    <p><strong>options:</strong> <code>msg:"описание"</code> — сообщение, <code>sid:число</code> — уникальный ID</p>
+
+                    <strong>Примеры:</strong>
+                    <pre>alert tcp any any -> any 22 (msg:"SSH Connection Attempt"; sid:2000001;)
+alert tcp any any -> any 3389 (msg:"RDP Connection Attempt"; sid:2000002;)
+alert udp any any -> any 53 (msg:"DNS Query"; sid:2000003;)
+alert tcp any any -> any 80 (msg:"HTTP Traffic"; sid:2000004;)
+alert tcp any any -> any 443 (msg:"HTTPS Traffic"; sid:2000005;)
+alert tcp any any -> any 445 (msg:"SMB/Windows Share Access"; sid:2000006;)
+alert tcp any any -> any 8080 (msg:"Proxy Port Access"; sid:2000007;)
+alert icmp any any -> any any (msg:"ICMP Ping Detected"; sid:2000008;)</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Массовый импорт -->
+        <div class="tab-content" id="tab-bulk">
+            <div class="card">
+                <h2>📥 Массовый импорт правил</h2>
+                <p style="color: #666; margin-bottom: 15px;">
+                    Вставьте несколько правил (каждое на новой строке). Строки начинающиеся с # будут пропущены.
+                </p>
+
+                <div class="form-group">
+                    <label>Правила:</label>
+                    <textarea id="bulk-rules" style="min-height: 200px;" placeholder="# Мои правила
+alert tcp any any -> any 8443 (msg:&quot;Alt HTTPS Port&quot;; sid:3000001;)
+alert tcp any any -> any 21 (msg:&quot;FTP Connection&quot;; sid:3000002;)"></textarea>
+                </div>
+
+                <button class="btn btn-primary" onclick="addBulkRules()">Импортировать правила</button>
+            </div>
+        </div>
+
+        <!-- Вкладка: Тест пакета -->
+        <div class="tab-content" id="tab-test">
+            <div class="card">
+                <h2>🧪 Тестовая проверка пакета</h2>
+                <p style="color: #666; margin-bottom: 15px;">
+                    Создайте тестовый пакет и проверьте, какие правила сработают.
+                </p>
+
+                <div class="grid-2">
+                    <div>
+                        <div class="form-group">
+                            <label>Source IP:</label>
+                            <input type="text" id="test-src-ip" value="192.168.1.100">
                         </div>
-                    </div>`
-                ).join('')}
-            `;
-        });
+                        <div class="form-group">
+                            <label>Source Port:</label>
+                            <input type="number" id="test-src-port" value="54321">
+                        </div>
+                        <div class="form-group">
+                            <label>Protocol:</label>
+                            <select id="test-protocol">
+                                <option value="TCP">TCP</option>
+                                <option value="UDP">UDP</option>
+                                <option value="ICMP">ICMP</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label>Destination IP:</label>
+                            <input type="text" id="test-dst-ip" value="10.0.0.1">
+                        </div>
+                        <div class="form-group">
+                            <label>Destination Port:</label>
+                            <input type="number" id="test-dst-port" value="22">
+                        </div>
+                        <div class="form-group" style="padding-top: 28px;">
+                            <button class="btn btn-primary" onclick="testPacket()">🔍 Проверить пакет</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="test-result"></div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Алерты Suricata -->
+        <div class="tab-content" id="tab-alerts">
+            <div class="grid-2" style="margin-bottom: 20px;">
+                <div class="card">
+                    <h2>📊 Топ сработавших правил</h2>
+                    <div class="chart-container">
+                        <canvas id="topRulesChart"></canvas>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>🎯 По серьёзности</h2>
+                    <div class="chart-container">
+                        <canvas id="severityPie"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h2>🚨 Последние алерты Suricata</h2>
+                <div id="suricata-alerts-list">
+                    <p style="color: #999; text-align: center; padding: 20px;">Загрузка...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div class="notification" id="notification"></div>
+
+    <script>
+        // ========== Notification ==========
+        function notify(msg, type = 'success') {
+            const el = document.getElementById('notification');
+            el.textContent = msg;
+            el.className = `notification ${type} show`;
+            setTimeout(() => el.classList.remove('show'), 3000);
+        }
+
+        // ========== Tabs ==========
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+
+            if (name === 'alerts') loadSuricataAlerts();
+            if (name === 'rules') loadRules();
+        }
+
+        // ========== Load Stats ==========
+        async function loadStats() {
+            try {
+                const [rulesResp, alertsResp] = await Promise.all([
+                    fetch('/api/suricata/rules'),
+                    fetch('/api/suricata/alerts/stats')
+                ]);
+                const rulesData = await rulesResp.json();
+                const alertsData = await alertsResp.json();
+
+                document.getElementById('s-total').textContent = rulesData.count || 0;
+                document.getElementById('s-active').textContent = rulesData.active || 0;
+                document.getElementById('s-alerts-total').textContent = alertsData.total || 0;
+                document.getElementById('s-alerts-hour').textContent = alertsData.last_hour || 0;
+            } catch (e) {
+                console.error('Stats error:', e);
+            }
+        }
+
+        // ========== Load Rules ==========
+        async function loadRules() {
+            try {
+                const resp = await fetch('/api/suricata/rules');
+                const data = await resp.json();
+
+                const container = document.getElementById('rules-table-container');
+
+                if (!data.rules || data.rules.length === 0) {
+                    container.innerHTML = '<p style="color:#999; text-align:center; padding:30px;">Нет загруженных правил</p>';
+                    return;
+                }
+
+                let html = `<table class="rules-table">
+                    <thead><tr>
+                        <th>SID</th><th>Действие</th><th>Протокол</th>
+                        <th>Описание</th><th>Направление</th>
+                        <th>Статус</th><th>Категория</th><th>Управление</th>
+                    </tr></thead><tbody>`;
+
+                for (const r of data.rules) {
+                    const actionClass = r.action === 'drop' ? 'drop-action' : (r.action === 'pass' ? 'pass-action' : 'alert-action');
+                    html += `<tr>
+                        <td><strong>${r.sid}</strong></td>
+                        <td><span class="badge ${actionClass}">${r.action}</span></td>
+                        <td>${r.protocol.toUpperCase()}</td>
+                        <td>${r.msg}</td>
+                        <td class="mono">${r.src_ip}:${r.src_port} ${r.direction} ${r.dst_ip}:${r.dst_port}</td>
+                        <td><span class="badge ${r.enabled ? 'enabled' : 'disabled'}">${r.enabled ? 'Вкл' : 'Выкл'}</span></td>
+                        <td><span class="badge ${r.category}">${r.category}</span></td>
+                        <td>
+                            <button class="btn btn-sm ${r.enabled ? 'btn-warning' : 'btn-success'}"
+                                    onclick="toggleRule(${r.sid}, ${!r.enabled})">
+                                ${r.enabled ? 'Выкл' : 'Вкл'}
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteRule(${r.sid})">✕</button>
+                        </td>
+                    </tr>`;
+                }
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Load rules error:', e);
+                document.getElementById('rules-table-container').innerHTML =
+                    '<p style="color:#e74c3c; text-align:center;">Ошибка загрузки правил</p>';
+            }
+        }
+
+        // ========== Add Rule ==========
+        async function addRule() {
+            const ruleText = document.getElementById('new-rule').value.trim();
+            if (!ruleText) { notify('Введите правило', 'error'); return; }
+
+            try {
+                const resp = await fetch('/api/suricata/rules', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({rule: ruleText})
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    notify(`Правило SID ${data.rule.sid} добавлено`);
+                    document.getElementById('new-rule').value = '';
+                    loadRules();
+                    loadStats();
+                } else {
+                    notify(data.error || 'Ошибка', 'error');
+                }
+            } catch (e) {
+                notify('Ошибка соединения', 'error');
+            }
+        }
+
+        // ========== Bulk Add ==========
+        async function addBulkRules() {
+            const text = document.getElementById('bulk-rules').value.trim();
+            if (!text) { notify('Вставьте правила', 'error'); return; }
+
+            try {
+                const resp = await fetch('/api/suricata/rules/bulk', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({rules: text})
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    notify(`Импортировано ${data.added} правил`);
+                    document.getElementById('bulk-rules').value = '';
+                    loadRules();
+                    loadStats();
+                } else {
+                    notify(data.error || 'Ошибка', 'error');
+                }
+            } catch (e) {
+                notify('Ошибка соединения', 'error');
+            }
+        }
+
+        // ========== Toggle Rule ==========
+        async function toggleRule(sid, enabled) {
+            try {
+                const resp = await fetch(`/api/suricata/rules/${sid}/toggle`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`SID ${sid} ${enabled ? 'включено' : 'выключено'}`);
+                    loadRules();
+                    loadStats();
+                }
+            } catch (e) {
+                notify('Ошибка', 'error');
+            }
+        }
+
+        // ========== Delete Rule ==========
+        async function deleteRule(sid) {
+            if (!confirm(`Удалить правило SID ${sid}?`)) return;
+
+            try {
+                const resp = await fetch(`/api/suricata/rules/${sid}`, {method: 'DELETE'});
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`SID ${sid} удалено`);
+                    loadRules();
+                    loadStats();
+                } else {
+                    notify(data.error, 'error');
+                }
+            } catch (e) {
+                notify('Ошибка', 'error');
+            }
+        }
+
+        // ========== Test Packet ==========
+        async function testPacket() {
+            const packet = {
+                src_ip: document.getElementById('test-src-ip').value,
+                dst_ip: document.getElementById('test-dst-ip').value,
+                src_port: parseInt(document.getElementById('test-src-port').value) || null,
+                dst_port: parseInt(document.getElementById('test-dst-port').value) || null,
+                protocol: document.getElementById('test-protocol').value
+            };
+
+            try {
+                const resp = await fetch('/api/suricata/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(packet)
+                });
+                const data = await resp.json();
+
+                const resultDiv = document.getElementById('test-result');
+
+                if (data.matched_rules > 0) {
+                    resultDiv.innerHTML = `
+                        <div class="test-result match">
+                            <strong>🚨 Сработало правил: ${data.matched_rules}</strong>
+                            ${data.alerts.map(a => `
+                                <div style="margin-top: 10px; padding: 10px; background: white; border-radius: 4px;">
+                                    <strong>SID ${a.sid}:</strong> ${a.msg}
+                                    <br><span class="badge ${a.severity}">${a.severity}</span>
+                                    <span class="badge ${a.action === 'drop' ? 'drop-action' : 'alert-action'}">${a.action}</span>
+                                </div>
+                            `).join('')}
+                        </div>`;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="test-result no-match">
+                            <strong>✅ Ни одно правило не сработало</strong>
+                            <p style="color:#666; margin-top:5px;">Пакет ${packet.src_ip}:${packet.src_port} → ${packet.dst_ip}:${packet.dst_port} (${packet.protocol}) — безопасен по текущим правилам.</p>
+                        </div>`;
+                }
+            } catch (e) {
+                notify('Ошибка тестирования', 'error');
+            }
+        }
+
+        // ========== Suricata Alerts ==========
+        let topRulesChart = null;
+        let severityPie = null;
+
+        async function loadSuricataAlerts() {
+            try {
+                const [alertsResp, statsResp] = await Promise.all([
+                    fetch('/api/suricata/alerts?limit=30'),
+                    fetch('/api/suricata/alerts/stats')
+                ]);
+                const alertsData = await alertsResp.json();
+                const statsData = await statsResp.json();
+
+                // Alerts list
+                const container = document.getElementById('suricata-alerts-list');
+                if (!alertsData.alerts || alertsData.alerts.length === 0) {
+                    container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">Нет алертов</p>';
+                } else {
+                    container.innerHTML = alertsData.alerts.map(a => `
+                        <div class="alert-item ${a.severity}">
+                            <div>
+                                <span class="badge ${a.severity}">${a.severity}</span>
+                                <strong>SID ${a.sid}:</strong> ${a.msg}
+                                <div class="mono" style="margin-top: 4px;">
+                                    ${a.src_ip}:${a.src_port || '-'} → ${a.dst_ip}:${a.dst_port || '-'} (${a.protocol})
+                                </div>
+                            </div>
+                            <div class="time">${a.timestamp_fmt || ''}</div>
+                        </div>
+                    `).join('');
+                }
+
+                // Top rules chart
+                const topRules = statsData.top_rules || [];
+                const ctx1 = document.getElementById('topRulesChart').getContext('2d');
+                if (topRulesChart) topRulesChart.destroy();
+
+                topRulesChart = new Chart(ctx1, {
+                    type: 'bar',
+                    data: {
+                        labels: topRules.map(r => `SID ${r.sid}`),
+                        datasets: [{
+                            label: 'Срабатываний',
+                            data: topRules.map(r => r.count),
+                            backgroundColor: ['#e74c3c', '#e67e22', '#f39c12', '#3498db', '#667eea'],
+                            borderRadius: 5
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { beginAtZero: true, ticks: { stepSize: 1 } },
+                            y: { grid: { display: false } }
+                        },
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+
+                // Severity pie
+                const sev = statsData.by_severity || {};
+                const sevLabels = Object.keys(sev);
+                const sevValues = Object.values(sev);
+                const colorMap = { critical: '#e74c3c', high: '#e67e22', medium: '#f39c12', low: '#3498db' };
+
+                const ctx2 = document.getElementById('severityPie').getContext('2d');
+                if (severityPie) severityPie.destroy();
+
+                severityPie = new Chart(ctx2, {
+                    type: 'doughnut',
+                    data: {
+                        labels: sevLabels.length ? sevLabels : ['Нет данных'],
+                        datasets: [{
+                            data: sevLabels.length ? sevValues : [1],
+                            backgroundColor: sevLabels.length ? sevLabels.map(l => colorMap[l] || '#95a5a6') : ['#e0e0e0'],
+                            borderWidth: 2, borderColor: '#fff'
+                        }]
+                    },
+                    options: {
+                        cutout: '60%',
+                        plugins: { legend: { position: 'bottom' } },
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+
+            } catch (e) {
+                console.error('Suricata alerts error:', e);
+            }
+        }
+
+        // ========== Init ==========
+        Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+        loadStats();
+        loadRules();
+
+        setInterval(loadStats, 10000);
     </script>
 </body>
 </html>
