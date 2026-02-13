@@ -57,6 +57,193 @@ def index():
     return render_template('dashboard.html')
 
 
+@app.route('/api/chart/alerts_timeline')
+def chart_alerts_timeline():
+    """API: Данные для графика алертов по времени (последние 24 часа, по часам)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        now = datetime.now().timestamp()
+        day_ago = now - 86400
+
+        # Считаем алерты по часам за последние 24 часа
+        cursor.execute('''
+            SELECT CAST((timestamp - ?) / 3600 AS INTEGER) AS hour_bucket,
+                   COUNT(*) AS cnt,
+                   SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+                   SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
+                   SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS medium,
+                   SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS low
+            FROM alerts
+            WHERE timestamp > ?
+            GROUP BY hour_bucket
+            ORDER BY hour_bucket
+        ''', (day_ago, day_ago))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        labels = []
+        total = []
+        critical = []
+        high = []
+        medium = []
+        low = []
+
+        for row in rows:
+            hour_offset = row[0]
+            t = datetime.fromtimestamp(day_ago + hour_offset * 3600)
+            labels.append(t.strftime('%H:%M'))
+            total.append(row[1])
+            critical.append(row[2])
+            high.append(row[3])
+            medium.append(row[4])
+            low.append(row[5])
+
+        return jsonify({
+            'labels': labels,
+            'datasets': {
+                'total': total,
+                'critical': critical,
+                'high': high,
+                'medium': medium,
+                'low': low
+            }
+        })
+    except Exception as e:
+        logger.error(f"Ошибка chart_alerts_timeline: {e}")
+        return jsonify({'labels': [], 'datasets': {}}), 500
+
+
+@app.route('/api/chart/severity_distribution')
+def chart_severity_distribution():
+    """API: Распределение алертов по severity (для pie/doughnut chart)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT severity, COUNT(*) FROM alerts GROUP BY severity
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+
+        labels = []
+        values = []
+        for row in rows:
+            labels.append(row[0])
+            values.append(row[1])
+
+        return jsonify({'labels': labels, 'values': values})
+    except Exception as e:
+        logger.error(f"Ошибка chart_severity_distribution: {e}")
+        return jsonify({'labels': [], 'values': []}), 500
+
+
+@app.route('/api/chart/traffic_metrics')
+def chart_traffic_metrics():
+    """API: Метрики трафика по временным окнам (для line chart на мониторинге)"""
+    try:
+        src_ip = request.args.get('src_ip', None)
+        limit = request.args.get('limit', 30, type=int)
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        if src_ip:
+            cursor.execute('''
+                SELECT DISTINCT window_start, window_end
+                FROM aggregated_metrics
+                WHERE src_ip = ?
+                ORDER BY window_start DESC
+                LIMIT ?
+            ''', (src_ip, limit))
+        else:
+            cursor.execute('''
+                SELECT DISTINCT window_start, window_end
+                FROM aggregated_metrics
+                ORDER BY window_start DESC
+                LIMIT ?
+            ''', (limit,))
+
+        windows = cursor.fetchall()
+        windows.reverse()  # хронологический порядок
+
+        labels = []
+        connections = []
+        unique_ports = []
+        unique_dst_ips = []
+        total_bytes = []
+
+        for ws, we in windows:
+            t = datetime.fromtimestamp(we)
+            labels.append(t.strftime('%H:%M'))
+
+            if src_ip:
+                cursor.execute('''
+                    SELECT metric_name, SUM(metric_value)
+                    FROM aggregated_metrics
+                    WHERE window_start = ? AND src_ip = ?
+                    GROUP BY metric_name
+                ''', (ws, src_ip))
+            else:
+                cursor.execute('''
+                    SELECT metric_name, SUM(metric_value)
+                    FROM aggregated_metrics
+                    WHERE window_start = ?
+                    GROUP BY metric_name
+                ''', (ws,))
+
+            metrics_map = {}
+            for name, val in cursor.fetchall():
+                metrics_map[name] = val
+
+            connections.append(metrics_map.get('connections_count', 0))
+            unique_ports.append(metrics_map.get('unique_ports', 0))
+            unique_dst_ips.append(metrics_map.get('unique_dst_ips', 0))
+            total_bytes.append(metrics_map.get('total_bytes', 0))
+
+        conn.close()
+
+        return jsonify({
+            'labels': labels,
+            'datasets': {
+                'connections_count': connections,
+                'unique_ports': unique_ports,
+                'unique_dst_ips': unique_dst_ips,
+                'total_bytes': total_bytes
+            }
+        })
+    except Exception as e:
+        logger.error(f"Ошибка chart_traffic_metrics: {e}")
+        return jsonify({'labels': [], 'datasets': {}}), 500
+
+
+@app.route('/api/chart/top_hosts')
+def chart_top_hosts():
+    """API: Топ хостов по количеству алертов (для bar chart)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT src_ip, COUNT(*) AS cnt
+            FROM alerts
+            GROUP BY src_ip
+            ORDER BY cnt DESC
+            LIMIT 10
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+
+        labels = [r[0] for r in rows]
+        values = [r[1] for r in rows]
+
+        return jsonify({'labels': labels, 'values': values})
+    except Exception as e:
+        logger.error(f"Ошибка chart_top_hosts: {e}")
+        return jsonify({'labels': [], 'values': []}), 500
+
+
 @app.route('/api/stats')
 def get_stats():
     """API: Получение общей статистики системы"""

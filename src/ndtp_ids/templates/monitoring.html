@@ -3,15 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NDTP IDS - Мониторинг в реальном времени</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>NDTP IDS - Мониторинг</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 { font-size: 28px; margin-bottom: 5px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+
+        .nav {
+            background: white;
+            padding: 15px 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+        .nav a {
+            color: #667eea; text-decoration: none; margin-right: 25px;
+            font-weight: 500; transition: color 0.3s;
+        }
+        .nav a:hover { color: #764ba2; }
+        .nav a.active { color: #764ba2; border-bottom: 2px solid #764ba2; padding-bottom: 2px; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        .card {
+            background: white; padding: 25px; border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 20px;
+        }
+        .card h2 {
+            margin-bottom: 20px; color: #333; font-size: 20px;
+            border-bottom: 2px solid #667eea; padding-bottom: 10px;
+        }
+
+        .chart-container { position: relative; width: 100%; height: 350px; }
+
+        .grid-2 {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 20px; margin-bottom: 20px;
+        }
+        .grid-3 {
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px; margin-bottom: 20px;
+        }
+
+        .filter-bar {
+            display: flex; gap: 15px; align-items: center;
+            margin-bottom: 20px; flex-wrap: wrap;
+        }
+        .filter-bar label { font-weight: 500; color: #555; }
+        .filter-bar select, .filter-bar input {
+            padding: 8px 14px; border: 1px solid #ddd; border-radius: 6px;
+            font-size: 14px; background: white;
+        }
+        .filter-bar button {
+            padding: 8px 20px; background: #667eea; color: white;
+            border: none; border-radius: 6px; cursor: pointer; font-size: 14px;
+        }
+        .filter-bar button:hover { background: #764ba2; }
+
+        .stat-mini {
+            text-align: center; padding: 20px; background: #f9f9fb; border-radius: 8px;
+        }
+        .stat-mini .val { font-size: 28px; font-weight: bold; color: #667eea; }
+        .stat-mini .lbl { font-size: 12px; color: #999; margin-top: 5px; text-transform: uppercase; }
+
+        @media (max-width: 768px) {
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+        }
+    </style>
 </head>
 <body>
     <div class="header">
         <h1>🛡️ NDTP IDS</h1>
         <p>Мониторинг в реальном времени</p>
     </div>
-    
+
     <div class="nav">
         <a href="/">Dashboard</a>
         <a href="/monitoring" class="active">Мониторинг</a>
@@ -20,18 +98,186 @@
         <a href="/rules">Правила Suricata</a>
         <a href="/training">Обучение</a>
     </div>
-    
+
     <div class="container">
+        <!-- Фильтры -->
         <div class="card">
-            <h2>🔴 Live Monitoring</h2>
-            <p style="color: #999; margin-bottom: 20px;">
-                Эта страница отображает события в реальном времени. 
-                Для полноценной реализации требуется WebSocket соединение.
-            </p>
-            <div id="live-events" style="font-family: monospace; font-size: 12px; max-height: 600px; overflow-y: auto; background: #f9f9f9; padding: 15px; border-radius: 5px;">
-                <div style="color: #999;">Ожидание событий...</div>
+            <div class="filter-bar">
+                <label>Хост:</label>
+                <select id="hostSelect">
+                    <option value="">Все хосты</option>
+                </select>
+                <label>Окон:</label>
+                <input type="number" id="limitInput" value="30" min="5" max="100" style="width: 80px;">
+                <button onclick="refreshCharts()">Обновить</button>
+            </div>
+        </div>
+
+        <!-- Мини-статистика -->
+        <div class="grid-3" id="miniStats">
+            <div class="stat-mini">
+                <div class="val" id="ms-connections">-</div>
+                <div class="lbl">Соединений (последнее окно)</div>
+            </div>
+            <div class="stat-mini">
+                <div class="val" id="ms-ports">-</div>
+                <div class="lbl">Уникальных портов</div>
+            </div>
+            <div class="stat-mini">
+                <div class="val" id="ms-bytes">-</div>
+                <div class="lbl">Байт трафика</div>
+            </div>
+        </div>
+
+        <!-- Соединения -->
+        <div class="card">
+            <h2>📈 Количество соединений</h2>
+            <div class="chart-container">
+                <canvas id="connectionsChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Порты и IP назначения -->
+        <div class="grid-2">
+            <div class="card">
+                <h2>🔌 Уникальные порты</h2>
+                <div class="chart-container">
+                    <canvas id="portsChart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <h2>🌐 Уникальные IP назначения</h2>
+                <div class="chart-container">
+                    <canvas id="dstIpsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Объем трафика -->
+        <div class="card">
+            <h2>📦 Объём трафика (байты)</h2>
+            <div class="chart-container">
+                <canvas id="bytesChart"></canvas>
             </div>
         </div>
     </div>
+
+    <script>
+        const COLORS = {
+            primary: '#667eea', success: '#2ecc71', purple: '#764ba2',
+            orange: '#e67e22', red: '#e74c3c', grey: '#95a5a6'
+        };
+
+        Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        Chart.defaults.responsive = true;
+        Chart.defaults.maintainAspectRatio = false;
+
+        let charts = {};
+
+        function createLineChart(canvasId, label, color, data) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            if (charts[canvasId]) charts[canvasId].destroy();
+
+            charts[canvasId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: label,
+                        data: data.values,
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 12 },
+                            padding: 10,
+                            cornerRadius: 6
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: { beginAtZero: true }
+                    },
+                    interaction: { mode: 'index', intersect: false }
+                }
+            });
+        }
+
+        async function loadHostsList() {
+            try {
+                const resp = await fetch('/api/hosts');
+                const data = await resp.json();
+                const select = document.getElementById('hostSelect');
+                (data.hosts || []).forEach(h => {
+                    const opt = document.createElement('option');
+                    opt.value = h.src_ip;
+                    opt.textContent = h.src_ip;
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Hosts list error:', e);
+            }
+        }
+
+        async function refreshCharts() {
+            const srcIp = document.getElementById('hostSelect').value;
+            const limit = document.getElementById('limitInput').value || 30;
+
+            let url = `/api/chart/traffic_metrics?limit=${limit}`;
+            if (srcIp) url += `&src_ip=${encodeURIComponent(srcIp)}`;
+
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+
+                const labels = data.labels || [];
+                const ds = data.datasets || {};
+
+                const conn = ds.connections_count || [];
+                const ports = ds.unique_ports || [];
+                const dstIps = ds.unique_dst_ips || [];
+                const bytes = ds.total_bytes || [];
+
+                createLineChart('connectionsChart', 'Соединения', COLORS.primary,
+                    { labels, values: conn });
+                createLineChart('portsChart', 'Уникальные порты', COLORS.success,
+                    { labels, values: ports });
+                createLineChart('dstIpsChart', 'Уникальные IP', COLORS.purple,
+                    { labels, values: dstIps });
+                createLineChart('bytesChart', 'Байты', COLORS.orange,
+                    { labels, values: bytes });
+
+                // Мини-статистика (последнее значение)
+                const last = conn.length - 1;
+                document.getElementById('ms-connections').textContent =
+                    last >= 0 ? conn[last].toLocaleString() : '-';
+                document.getElementById('ms-ports').textContent =
+                    last >= 0 ? ports[last].toLocaleString() : '-';
+                document.getElementById('ms-bytes').textContent =
+                    last >= 0 ? bytes[last].toLocaleString() : '-';
+
+            } catch (e) {
+                console.error('Traffic metrics error:', e);
+            }
+        }
+
+        // Init
+        loadHostsList();
+        refreshCharts();
+
+        // Auto-refresh every 15 seconds
+        setInterval(refreshCharts, 15000);
+    </script>
 </body>
 </html>
