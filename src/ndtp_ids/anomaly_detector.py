@@ -1,5 +1,5 @@
 """
-Детектор аномалий для NDTP IDS
+Детектор аномалий
 Использует статистические методы (z-score) для обнаружения аномального поведения в сети
 """
 import sqlite3
@@ -34,7 +34,7 @@ class AnomalyDetector:
     для каждого хоста и детектирует аномалии при значительных отклонениях.
     """
     
-    def __init__(self, db_path: str = "ndtp_ids.db", z_threshold: float = 3.0):
+    def __init__(self, db_path: str = "ids.db", z_threshold: float = 3.0):
         """
         Инициализация детектора
         
@@ -449,7 +449,7 @@ class AnomalyDetector:
         conn.close()
 
 
-def run_detector(db_path: str = "ndtp_ids.db", z_threshold: float = 3.0, 
+def run_detector(db_path: str = "ids.db", z_threshold: float = 3.0, 
                  interval_seconds: int = 60):
     """
     Запуск детектора аномалий с периодическими проверками
@@ -480,12 +480,12 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="NDTP IDS Anomaly Detector - детектор аномалий сетевого трафика"
+        description="Anomaly Detector — детектор аномалий сетевого трафика"
     )
     parser.add_argument(
         "--db", 
-        default="ndtp_ids.db",
-        help="Путь к базе данных SQLite (по умолчанию: ndtp_ids.db)"
+        default="ids.db",
+        help="Путь к базе данных SQLite (по умолчанию: ids.db)"
     )
     parser.add_argument(
         "--threshold",

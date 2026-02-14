@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NDTP IDS - Dashboard</title>
+    <title>IDS - Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
         * {
@@ -241,8 +241,8 @@
 </head>
 <body>
     <div class="header">
-        <h1>🛡️ NDTP IDS</h1>
-        <p>Network Data Traffic Processing - Intrusion Detection System</p>
+        <h1>🛡️ IDS</h1>
+        <p>Система обнаружения вторжений</p>
     </div>
     
     <div class="nav">
@@ -592,7 +592,7 @@
                 alertsList.innerHTML = data.alerts.map(alert => `
                     <div class="alert-item ${alert.severity}">
                         <div class="time">${new Date(alert.timestamp).toLocaleString()}</div>
-                        <div class="ip">${alert.src_ip} - ${alert.anomaly_type}</div>
+                        <div class="ip">${alert.src_ip}</div>
                         <div class="desc">${alert.description}</div>
                         <div style="margin-top: 5px;">
                             <span class="badge ${alert.severity}">${alert.severity}</span>

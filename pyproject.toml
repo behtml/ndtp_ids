@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ndtp_ids"
 version = "0.1.0"
-description = "Network Data Traffic Processing Intrusion Detection System - Packet Collector Module"
+description = "Intrusion Detection System - Packet Collector Module"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "NDTP IDS Team"}
+    {name = "IDS Team"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

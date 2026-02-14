@@ -1,10 +1,10 @@
-from scapy.all import sniff, IP, TCP, UDP
+from scapy.all import sniff, IP, TCP, UDP, ICMP
 from dataclasses import dataclass, asdict
 import time
 import json
 import socket
 
-LOCAL_NET_PREFIX = "192.168."  # можно изменить под вашу сеть
+LOCAL_NET_PREFIX = ""  # можно изменить под вашу сеть
 
 
 @dataclass
@@ -46,6 +46,8 @@ def process_packet(packet):
         protocol = "UDP"
         src_port = packet[UDP].sport
         dst_port = packet[UDP].dport
+    elif packet.haslayer(ICMP):
+        protocol = "ICMP"
 
     event = PacketEvent(
         timestamp=time.time(),
@@ -79,7 +81,6 @@ def start_collector(interface: str):
 
 
 if __name__ == "__main__":
-    # Пример интерфейса:
     # Linux: eth0, wlan0
     # Windows: "Ethernet", "Wi-Fi"
     start_collector(interface="eth0")

@@ -1,15 +1,15 @@
 """
-Утилита для инициализации и проверки базы данных NDTP IDS
+Утилита для инициализации и проверки базы данных
 
 Этот скрипт создает все необходимые таблицы и индексы для работы системы.
-Может быть запущен отдельно: python -m ndtp_ids.init_db
+Может быть запущен отдельно: python -m init_db
 """
 import sqlite3
 import sys
 from pathlib import Path
 
 
-def init_database(db_path: str = "ndtp_ids.db"):
+def init_database(db_path: str = "ids.db"):
     """
     Инициализация всех таблиц и индексов базы данных
     
@@ -191,12 +191,12 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Инициализация базы данных NDTP IDS"
+        description="Инициализация базы данных IDS"
     )
     parser.add_argument(
         "--db",
-        default="ndtp_ids.db",
-        help="Путь к базе данных SQLite (по умолчанию: ndtp_ids.db)"
+        default="ids.db",
+        help="Путь к базе данных SQLite (по умолчанию: ids.db)"
     )
     
     args = parser.parse_args()

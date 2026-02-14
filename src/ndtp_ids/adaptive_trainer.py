@@ -45,7 +45,7 @@ class AdaptiveTrainer:
     
     def __init__(
         self,
-        db_path: str = "ndtp_ids.db",
+        db_path: str = "ids.db",
         learning_window: int = 100,  # Количество наблюдений для обучения
         ewma_alpha: float = 0.1,  # Коэффициент сглаживания (0.05-0.2)
         sliding_window_size: int = 50,  # Размер скользящего окна
@@ -73,7 +73,7 @@ class AdaptiveTrainer:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Таблица для профилей хостов (уже существует в anomaly_detector)
+        # Таблица для профилей хостов
         # Добавляем дополнительные поля для адаптивного обучения
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS host_profiles (
