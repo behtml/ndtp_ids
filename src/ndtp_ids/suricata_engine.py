@@ -28,7 +28,7 @@ class SuricataEngine:
     Хранит правила в БД, проверяет пакеты, генерирует алерты.
     """
     
-    def __init__(self, db_path: str = "ndtp_ids.db"):
+    def __init__(self, db_path: str = "ids.db"):
         self.db_path = db_path
         self.parser = SuricataRuleParser()
         self.init_database()
@@ -60,7 +60,7 @@ class SuricataEngine:
                 )
             ''')
             
-            # Таблица для алертов Suricata (отдельно от anomaly detector)
+            # Таблица для алертов Suricata
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS suricata_alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -432,12 +432,12 @@ class SuricataEngine:
         }
 
 
-def run_suricata_ids(db_path: str = "ndtp_ids.db", input_stream=None):
+def run_suricata_ids(db_path: str = "ids.db", input_stream=None):
     """
     Запуск IDS: читает JSON-события из stdin (от коллектора) и проверяет по правилам
     
     Использование:
-        python packet_collector.py | python -m ndtp_ids.suricata_engine
+        python packet_collector.py | python -m suricata_engine
     """
     import sys
     
@@ -496,11 +496,11 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="NDTP IDS — Suricata Rule Engine (сигнатурный анализ пакетов)"
+        description="Suricata Rule Engine — сигнатурный анализ пакетов"
     )
     parser.add_argument(
-        "--db", default="ndtp_ids.db",
-        help="Путь к базе данных SQLite (по умолчанию: ndtp_ids.db)"
+        "--db", default="ids.db",
+        help="Путь к базе данных SQLite (по умолчанию: ids.db)"
     )
     
     args = parser.parse_args()

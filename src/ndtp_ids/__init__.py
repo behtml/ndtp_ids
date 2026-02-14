@@ -1,17 +1,18 @@
 """
-NDTP IDS - Network Data Traffic Processing Intrusion Detection System
+Система обнаружения вторжений
 
 Модульная система обнаружения вторжений, включающая:
 - packet_collector: Коллектор пакетов для захвата сетевого трафика
 - aggregator: Агрегатор метрик по временным окнам
-- anomaly_detector: Детектор аномалий на основе z-score метода
+- suricata_engine: Движок IDS на основе правил Suricata
 """
 
 __version__ = "0.1.0"
 
 from ndtp_ids.packet_collector import start_collector, process_packet, PacketEvent
 from ndtp_ids.aggregator import MetricsAggregator, run_aggregator
-from ndtp_ids.anomaly_detector import AnomalyDetector, run_detector, Alert
+from ndtp_ids.suricata_engine import SuricataEngine
+from ndtp_ids.suricata_rules import SuricataRuleParser, SuricataRule
 
 __all__ = [
     # Packet Collector
@@ -23,8 +24,8 @@ __all__ = [
     "MetricsAggregator",
     "run_aggregator",
     
-    # Anomaly Detector
-    "AnomalyDetector",
-    "run_detector",
-    "Alert",
+    # Suricata Engine
+    "SuricataEngine",
+    "SuricataRuleParser",
+    "SuricataRule",
 ]

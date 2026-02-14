@@ -1,5 +1,5 @@
 """
-Веб-интерфейс для NDTP IDS
+Веб-интерфейс
 Flask-based dashboard для мониторинга и управления системой обнаружения вторжений
 """
 from flask import Flask, render_template, jsonify, request, send_from_directory
@@ -12,7 +12,6 @@ import logging
 
 # Импорты модулей системы
 try:
-    from .anomaly_detector import AnomalyDetector
     from .adaptive_trainer import AdaptiveTrainer
     from .suricata_rules import SuricataRuleParser, DEFAULT_RULES
     from .suricata_engine import SuricataEngine
@@ -20,7 +19,6 @@ except ImportError:
     # Для запуска как standalone скрипт
     import sys
     sys.path.insert(0, os.path.dirname(__file__))
-    from anomaly_detector import AnomalyDetector
     from adaptive_trainer import AdaptiveTrainer
     from suricata_rules import SuricataRuleParser, DEFAULT_RULES
     from suricata_engine import SuricataEngine
@@ -30,11 +28,10 @@ logger = logging.getLogger(__name__)
 # Инициализация Flask приложения
 app = Flask(__name__)
 # Security: Use environment variable for SECRET_KEY in production
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ndtp-ids-secret-key-change-in-production')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ids-secret-key-change-in-production')
 
 # Глобальные переменные для компонентов системы
-DB_PATH = "ndtp_ids.db"
-detector = None
+DB_PATH = "ids.db"
 trainer = None
 rule_parser = None
 suricata_engine = None
@@ -42,9 +39,8 @@ suricata_engine = None
 
 def init_components():
     """Инициализация компонентов системы"""
-    global detector, trainer, rule_parser, suricata_engine
+    global trainer, rule_parser, suricata_engine
     
-    detector = AnomalyDetector(db_path=DB_PATH)
     trainer = AdaptiveTrainer(db_path=DB_PATH)
     rule_parser = SuricataRuleParser()
     
@@ -308,22 +304,9 @@ def get_alerts():
         limit = request.args.get('limit', 50, type=int)
         severity = request.args.get('severity', None, type=str)
         
-        alerts = detector.get_recent_alerts(limit=limit, severity=severity)
+        alerts = suricata_engine.get_recent_alerts(limit=limit, severity=severity)
         
-        alerts_data = []
-        for alert in alerts:
-            alerts_data.append({
-                'timestamp': datetime.fromtimestamp(alert.timestamp).isoformat(),
-                'src_ip': alert.src_ip,
-                'anomaly_type': alert.anomaly_type,
-                'score': round(alert.score, 2),
-                'current_value': round(alert.current_value, 2),
-                'mean_value': round(alert.mean_value, 2),
-                'severity': alert.severity,
-                'description': alert.description
-            })
-            
-        return jsonify({'alerts': alerts_data})
+        return jsonify({'alerts': alerts})
     except Exception as e:
         logger.error(f"Ошибка при получении алертов: {e}")
         return jsonify({'error': str(e)}), 500
@@ -397,7 +380,6 @@ def get_host_details(ip):
         for row in cursor.fetchall():
             alerts.append({
                 'timestamp': datetime.fromtimestamp(row[1]).isoformat(),
-                'anomaly_type': row[3],
                 'severity': row[9],
                 'description': row[10]
             })
@@ -636,7 +618,7 @@ def training():
     return render_template('training.html')
 
 
-def start_web_interface(host='127.0.0.1', port=5000, debug=False, db_path="ndtp_ids.db"):
+def start_web_interface(host='127.0.0.1', port=5000, debug=False, db_path="ids.db"):
     """
     Запуск веб-интерфейса
     
@@ -668,11 +650,11 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    parser = argparse.ArgumentParser(description='NDTP IDS Web Interface')
+    parser = argparse.ArgumentParser(description='IDS Web Interface')
     parser.add_argument('--host', default='127.0.0.1', 
                        help='Host to listen on (default: 127.0.0.1 for local only, use 0.0.0.0 for all interfaces)')
     parser.add_argument('--port', type=int, default=5000, help='Port to listen on')
-    parser.add_argument('--db', default='ndtp_ids.db', help='Database path')
+    parser.add_argument('--db', default='ids.db', help='Database path')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     
     args = parser.parse_args()

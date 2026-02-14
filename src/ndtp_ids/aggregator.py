@@ -1,5 +1,5 @@
 """
-Агрегатор метрик для NDTP IDS
+Агрегатор метрик
 Группирует события из коллектора пакетов по временным окнам и вычисляет метрики
 """
 import json
@@ -12,8 +12,7 @@ from typing import Dict, List
 
 
 class MetricsAggregator:
-    """
-    Агрегатор метрик сетевого трафика
+    """Агрегатор метрик сетевого трафика
     
     Собирает события из коллектора и вычисляет:
     - Количество соединений (connections_count)
@@ -23,7 +22,7 @@ class MetricsAggregator:
     - Средний размер пакета (avg_packet_size)
     """
     
-    def __init__(self, db_path: str = "ndtp_ids.db", window_minutes: int = 10):
+    def __init__(self, db_path: str = "ids.db", window_minutes: int = 10):
         """
         Инициализация агрегатора
         
@@ -294,7 +293,7 @@ class MetricsAggregator:
         return metrics
 
 
-def run_aggregator(input_stream=sys.stdin, db_path: str = "ndtp_ids.db", 
+def run_aggregator(input_stream=sys.stdin, db_path: str = "ids.db", 
                    window_minutes: int = 10):
     """
     Запуск агрегатора с чтением событий из потока ввода
@@ -337,12 +336,12 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="NDTP IDS Aggregator - агрегация метрик сетевого трафика"
+        description="Aggregator — агрегация метрик сетевого трафика"
     )
     parser.add_argument(
         "--db", 
-        default="ndtp_ids.db",
-        help="Путь к базе данных SQLite (по умолчанию: ndtp_ids.db)"
+        default="ids.db",
+        help="Путь к базе данных SQLite (по умолчанию: ids.db)"
     )
     parser.add_argument(
         "--window",
