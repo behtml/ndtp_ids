@@ -32,6 +32,7 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ids-secret-key-change-i
 
 # Глобальные переменные для компонентов системы
 DB_PATH = "ids.db"
+RULES_DIR = os.path.join(os.path.dirname(__file__), 'rules')
 trainer = None
 rule_parser = None
 suricata_engine = None
@@ -50,6 +51,15 @@ def init_components():
     # Инициализируем Suricata Engine с БД-хранилищем правил
     suricata_engine = SuricataEngine(db_path=DB_PATH)
     suricata_engine.load_default_rules()
+    
+    # Автозагрузка правил из директории rules/
+    if os.path.isdir(RULES_DIR):
+        # Загружаем только те файлы, которые ещё не были загружены
+        available = suricata_engine.get_available_rule_files(RULES_DIR)
+        for rf in available:
+            if not rf['is_loaded']:
+                suricata_engine.add_rules_from_file(rf['path'], category=rf['category'])
+        logger.info(f"Rules directory: {RULES_DIR}")
     
     logger.info("Компоненты системы инициализированы")
 
@@ -585,6 +595,117 @@ def test_suricata_packet():
         })
     except Exception as e:
         logger.error(f"Ошибка при тестировании пакета: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== API: Управление файлами правил ====================
+
+@app.route('/api/suricata/rule-files')
+def get_rule_files():
+    """API: Список доступных файлов правил"""
+    try:
+        files = suricata_engine.get_available_rule_files(RULES_DIR)
+        return jsonify({'files': files, 'rules_dir': RULES_DIR})
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка файлов: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rule-files/load', methods=['POST'])
+def load_rule_file():
+    """API: Загрузка правил из конкретного файла"""
+    try:
+        data = request.get_json()
+        filename = data.get('filename', '')
+        
+        # Защита от path traversal
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return jsonify({'error': 'Недопустимое имя файла'}), 400
+        
+        filepath = os.path.join(RULES_DIR, filename)
+        if not os.path.exists(filepath):
+            return jsonify({'error': f'Файл {filename} не найден'}), 404
+        
+        category = os.path.splitext(filename)[0]
+        count = suricata_engine.add_rules_from_file(filepath, category=category)
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'category': category,
+            'loaded': count
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке файла правил: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rule-files/load-all', methods=['POST'])
+def load_all_rule_files():
+    """API: Загрузка всех файлов правил"""
+    try:
+        results = suricata_engine.load_rules_directory(RULES_DIR)
+        total = sum(results.values())
+        return jsonify({
+            'success': True,
+            'results': results,
+            'total_loaded': total,
+            'files_processed': len(results)
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке всех правил: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rule-files/unload', methods=['POST'])
+def unload_rule_file():
+    """API: Удаление правил определённой категории"""
+    try:
+        data = request.get_json()
+        category = data.get('category', '')
+        
+        if not category:
+            return jsonify({'error': 'Категория не указана'}), 400
+        
+        deleted = suricata_engine.delete_rules_by_category(category)
+        return jsonify({
+            'success': True,
+            'category': category,
+            'deleted': deleted
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при выгрузке правил: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/rule-files/toggle', methods=['POST'])
+def toggle_rule_file():
+    """API: Включение/выключение всех правил категории"""
+    try:
+        data = request.get_json()
+        category = data.get('category', '')
+        enabled = data.get('enabled', True)
+        
+        affected = suricata_engine.toggle_category(category, enabled)
+        return jsonify({
+            'success': True,
+            'category': category,
+            'enabled': enabled,
+            'affected': affected
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при переключении категории: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suricata/categories')
+def get_categories():
+    """API: Статистика по категориям правил"""
+    try:
+        categories = suricata_engine.get_categories_stats()
+        return jsonify({'categories': categories})
+    except Exception as e:
+        logger.error(f"Ошибка при получении категорий: {e}")
         return jsonify({'error': str(e)}), 500
 
 

@@ -220,10 +220,12 @@
         <div class="card" style="padding-bottom: 0;">
             <div class="tabs">
                 <button class="tab active" onclick="switchTab('rules')">📋 Правила</button>
+                <button class="tab" onclick="switchTab('files')">📁 Файлы правил</button>
+                <button class="tab" onclick="switchTab('categories')">🏷️ Категории</button>
                 <button class="tab" onclick="switchTab('add')">➕ Добавить правило</button>
                 <button class="tab" onclick="switchTab('bulk')">📥 Массовый импорт</button>
                 <button class="tab" onclick="switchTab('test')">🧪 Тест пакета</button>
-                <button class="tab" onclick="switchTab('alerts')">🚨 Алерты Suricata</button>
+                <button class="tab" onclick="switchTab('alerts')">🚨 Алерты</button>
             </div>
         </div>
 
@@ -232,6 +234,37 @@
             <div class="card">
                 <h2>📋 Активные правила Suricata</h2>
                 <div id="rules-table-container">
+                    <p style="color: #999; text-align: center; padding: 30px;">Загрузка...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Файлы правил -->
+        <div class="tab-content" id="tab-files">
+            <div class="card">
+                <h2>📁 Файлы правил Suricata</h2>
+                <p style="color: #666; margin-bottom: 15px;">
+                    Управление файлами правил из директории <code>rules/</code>. 
+                    Загрузите файлы в систему или выгрузите ненужные.
+                </p>
+                <div style="margin-bottom: 15px;">
+                    <button class="btn btn-primary" onclick="loadAllFiles()">📥 Загрузить все файлы</button>
+                    <button class="btn btn-outline" onclick="loadRuleFiles()" style="margin-left: 10px;">🔄 Обновить</button>
+                </div>
+                <div id="rule-files-container">
+                    <p style="color: #999; text-align: center; padding: 30px;">Загрузка...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Категории -->
+        <div class="tab-content" id="tab-categories">
+            <div class="card">
+                <h2>🏷️ Категории правил</h2>
+                <p style="color: #666; margin-bottom: 15px;">
+                    Группы правил по категориям. Можно включать/выключать целыми группами.
+                </p>
+                <div id="categories-container">
                     <p style="color: #999; text-align: center; padding: 30px;">Загрузка...</p>
                 </div>
             </div>
@@ -383,6 +416,8 @@ alert tcp any any -> any 21 (msg:&quot;FTP Connection&quot;; sid:3000002;)"></te
 
             if (name === 'alerts') loadSuricataAlerts();
             if (name === 'rules') loadRules();
+            if (name === 'files') loadRuleFiles();
+            if (name === 'categories') loadCategories();
         }
 
         // ========== Load Stats ==========
@@ -676,6 +711,212 @@ alert tcp any any -> any 21 (msg:&quot;FTP Connection&quot;; sid:3000002;)"></te
 
             } catch (e) {
                 console.error('Suricata alerts error:', e);
+            }
+        }
+
+        // ========== Rule Files ==========
+        async function loadRuleFiles() {
+            try {
+                const resp = await fetch('/api/suricata/rule-files');
+                const data = await resp.json();
+                const container = document.getElementById('rule-files-container');
+
+                if (!data.files || data.files.length === 0) {
+                    container.innerHTML = '<p style="color:#999; text-align:center; padding:30px;">Нет файлов правил в директории rules/</p>';
+                    return;
+                }
+
+                let html = `<table class="rules-table">
+                    <thead><tr>
+                        <th>Файл</th><th>Категория</th><th>Правил в файле</th>
+                        <th>Загружено</th><th>Активных</th><th>Статус</th><th>Управление</th>
+                    </tr></thead><tbody>`;
+
+                for (const f of data.files) {
+                    const statusBadge = f.is_loaded
+                        ? `<span class="badge enabled">Загружен</span>`
+                        : `<span class="badge disabled">Не загружен</span>`;
+
+                    html += `<tr>
+                        <td><strong>${f.filename}</strong></td>
+                        <td><span class="badge imported">${f.category}</span></td>
+                        <td>${f.rules_in_file}</td>
+                        <td>${f.loaded}</td>
+                        <td>${f.enabled}</td>
+                        <td>${statusBadge}</td>
+                        <td>`;
+
+                    if (f.is_loaded) {
+                        html += `
+                            <button class="btn btn-sm btn-warning" onclick="toggleFileRules('${f.category}', false)">Выкл все</button>
+                            <button class="btn btn-sm btn-success" onclick="toggleFileRules('${f.category}', true)">Вкл все</button>
+                            <button class="btn btn-sm btn-danger" onclick="unloadFile('${f.category}', '${f.filename}')">Выгрузить</button>`;
+                    } else {
+                        html += `
+                            <button class="btn btn-sm btn-primary" onclick="loadFile('${f.filename}')">Загрузить</button>`;
+                    }
+
+                    html += `</td></tr>`;
+                }
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Load rule files error:', e);
+                document.getElementById('rule-files-container').innerHTML =
+                    '<p style="color:#e74c3c; text-align:center;">Ошибка загрузки</p>';
+            }
+        }
+
+        async function loadFile(filename) {
+            try {
+                const resp = await fetch('/api/suricata/rule-files/load', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`Загружено ${data.loaded} правил из ${filename}`);
+                    loadRuleFiles();
+                    loadStats();
+                } else {
+                    notify(data.error || 'Ошибка', 'error');
+                }
+            } catch (e) {
+                notify('Ошибка соединения', 'error');
+            }
+        }
+
+        async function loadAllFiles() {
+            if (!confirm('Загрузить все файлы правил? Это может добавить большое количество правил.')) return;
+            try {
+                const resp = await fetch('/api/suricata/rule-files/load-all', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`Загружено ${data.total_loaded} правил из ${data.files_processed} файлов`);
+                    loadRuleFiles();
+                    loadStats();
+                } else {
+                    notify(data.error || 'Ошибка', 'error');
+                }
+            } catch (e) {
+                notify('Ошибка соединения', 'error');
+            }
+        }
+
+        async function unloadFile(category, filename) {
+            if (!confirm(`Выгрузить все правила из ${filename}?`)) return;
+            try {
+                const resp = await fetch('/api/suricata/rule-files/unload', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({category})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`Удалено ${data.deleted} правил категории ${category}`);
+                    loadRuleFiles();
+                    loadStats();
+                } else {
+                    notify(data.error || 'Ошибка', 'error');
+                }
+            } catch (e) {
+                notify('Ошибка соединения', 'error');
+            }
+        }
+
+        async function toggleFileRules(category, enabled) {
+            try {
+                const resp = await fetch('/api/suricata/rule-files/toggle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({category, enabled})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`${category}: ${enabled ? 'включено' : 'выключено'} ${data.affected} правил`);
+                    loadRuleFiles();
+                    loadStats();
+                } else {
+                    notify(data.error || 'Ошибка', 'error');
+                }
+            } catch (e) {
+                notify('Ошибка соединения', 'error');
+            }
+        }
+
+        // ========== Categories ==========
+        async function loadCategories() {
+            try {
+                const resp = await fetch('/api/suricata/categories');
+                const data = await resp.json();
+                const container = document.getElementById('categories-container');
+
+                if (!data.categories || data.categories.length === 0) {
+                    container.innerHTML = '<p style="color:#999; text-align:center; padding:30px;">Нет загруженных категорий</p>';
+                    return;
+                }
+
+                let totalAll = 0, activeAll = 0;
+                data.categories.forEach(c => { totalAll += c.total; activeAll += c.active; });
+
+                let html = `<div class="stats-row" style="margin-bottom:20px;">
+                    <div class="stat-box ok"><div class="val">${data.categories.length}</div><div class="lbl">Категорий</div></div>
+                    <div class="stat-box"><div class="val">${totalAll}</div><div class="lbl">Всего правил</div></div>
+                    <div class="stat-box ok"><div class="val">${activeAll}</div><div class="lbl">Активных</div></div>
+                    <div class="stat-box warn"><div class="val">${totalAll - activeAll}</div><div class="lbl">Выключенных</div></div>
+                </div>`;
+
+                html += `<table class="rules-table">
+                    <thead><tr>
+                        <th>Категория</th><th>Всего правил</th><th>Активных</th>
+                        <th>Выключенных</th><th>Управление</th>
+                    </tr></thead><tbody>`;
+
+                for (const c of data.categories) {
+                    const pct = c.total > 0 ? Math.round(c.active / c.total * 100) : 0;
+                    html += `<tr>
+                        <td><span class="badge imported">${c.category}</span></td>
+                        <td><strong>${c.total}</strong></td>
+                        <td style="color:#2ecc71;">${c.active}</td>
+                        <td style="color:#e74c3c;">${c.total - c.active}</td>
+                        <td>
+                            <button class="btn btn-sm btn-success" onclick="toggleFileRules('${c.category}', true)">Вкл все</button>
+                            <button class="btn btn-sm btn-warning" onclick="toggleFileRules('${c.category}', false)">Выкл все</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteCategory('${c.category}')">Удалить</button>
+                        </td>
+                    </tr>`;
+                }
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Load categories error:', e);
+                document.getElementById('categories-container').innerHTML =
+                    '<p style="color:#e74c3c; text-align:center;">Ошибка загрузки</p>';
+            }
+        }
+
+        async function deleteCategory(category) {
+            if (!confirm(`Удалить все правила категории "${category}"?`)) return;
+            try {
+                const resp = await fetch('/api/suricata/rule-files/unload', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({category})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    notify(`Удалено ${data.deleted} правил`);
+                    loadCategories();
+                    loadStats();
+                }
+            } catch (e) {
+                notify('Ошибка', 'error');
             }
         }
 

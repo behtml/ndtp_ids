@@ -68,14 +68,28 @@ class SuricataRuleParser:
         msg = ""
         sid = 0
         
-        # Разбиваем опции по ; учитывая кавычки
-        option_pattern = r'(\w+):\s*"([^"]*)"'
-        for opt_match in re.finditer(option_pattern, options_str):
+        # Парсим все опции: key:"value" и key:value
+        # Сначала извлекаем опции с кавычками
+        quoted_pattern = r'([\w-]+):\s*"([^"]*)"'
+        for opt_match in re.finditer(quoted_pattern, options_str):
             key, value = opt_match.groups()
             options[key] = value
             if key == "msg":
                 msg = value
-                
+        
+        # Затем извлекаем опции без кавычек (classtype, rev, flow, app-layer-event и т.д.)
+        # Разбиваем по ; и парсим каждую опцию
+        for opt_part in options_str.split(';'):
+            opt_part = opt_part.strip()
+            if not opt_part or '"' in opt_part:
+                continue  # пропускаем пустые и уже обработанные с кавычками
+            if ':' in opt_part:
+                key, _, value = opt_part.partition(':')
+                key = key.strip()
+                value = value.strip()
+                if key and value and key not in options:
+                    options[key] = value
+        
         # Извлечение sid
         sid_match = re.search(r'sid:\s*(\d+)', options_str)
         if sid_match:
@@ -108,8 +122,22 @@ class SuricataRuleParser:
         count = 0
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
+                accumulated = ""
                 for line in f:
-                    rule = self.parse_rule(line)
+                    stripped = line.rstrip('\n\r')
+                    if stripped.endswith('\\'):
+                        # Строка продолжается на следующей строке
+                        accumulated += stripped[:-1].rstrip() + " "
+                        continue
+                    accumulated += stripped
+                    rule = self.parse_rule(accumulated)
+                    accumulated = ""
+                    if rule:
+                        self.rules.append(rule)
+                        count += 1
+                # На случай если файл заканчивается строкой с \
+                if accumulated.strip():
+                    rule = self.parse_rule(accumulated)
                     if rule:
                         self.rules.append(rule)
                         count += 1

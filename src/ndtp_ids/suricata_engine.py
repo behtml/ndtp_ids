@@ -11,6 +11,7 @@ Suricata Rule Engine — модуль обнаружения угроз на о�
 import sqlite3
 import sys
 import json
+import os
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -185,14 +186,58 @@ class SuricataEngine:
             return None
     
     def add_rules_from_text(self, text: str, category: str = 'custom') -> int:
-        """Добавление нескольких правил из текста"""
-        count = 0
+        """Добавление нескольких правил из текста (оптимизированная батч-вставка)"""
+        # Собираем все строки правил с учётом \ продолжения
+        rule_lines = []
+        accumulated = ""
         for line in text.strip().split('\n'):
-            line = line.strip()
-            if line and not line.startswith('#'):
-                result = self.add_rule(line, category=category)
-                if result:
-                    count += 1
+            stripped = line.rstrip()
+            if stripped.endswith('\\'):
+                accumulated += stripped[:-1].rstrip() + " "
+                continue
+            accumulated += stripped
+            line_clean = accumulated.strip()
+            accumulated = ""
+            if line_clean and not line_clean.startswith('#'):
+                rule_lines.append(line_clean)
+        if accumulated.strip() and not accumulated.strip().startswith('#'):
+            rule_lines.append(accumulated.strip())
+        
+        if not rule_lines:
+            return 0
+        
+        # Парсим и вставляем батчом
+        count = 0
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        for line_clean in rule_lines:
+            rule = self.parser.parse_rule(line_clean)
+            if not rule:
+                continue
+            try:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO suricata_rules
+                    (sid, action, protocol, src_ip, src_port, direction, dst_ip, dst_port,
+                     msg, options, raw_rule, enabled, category)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                ''', (
+                    rule.sid, rule.action, rule.protocol,
+                    rule.src_ip, rule.src_port, rule.direction,
+                    rule.dst_ip, rule.dst_port, rule.msg,
+                    json.dumps(rule.options), rule.raw_rule, category
+                ))
+                count += 1
+            except Exception as e:
+                print(f"[SuricataEngine] Error adding rule SID {rule.sid}: {e}", file=sys.stderr)
+        
+        conn.commit()
+        conn.close()
+        
+        # Перезагружаем один раз после всех вставок
+        if count > 0:
+            self._load_rules_from_db()
+        
         return count
     
     def add_rules_from_file(self, filepath: str, category: str = 'imported') -> int:
@@ -204,6 +249,144 @@ class SuricataEngine:
         except Exception as e:
             print(f"[SuricataEngine] Error loading file {filepath}: {e}", file=sys.stderr)
             return 0
+    
+    def load_rules_directory(self, rules_dir: str) -> Dict:
+        """
+        Загрузка всех .rules файлов из директории
+        
+        Args:
+            rules_dir: Путь к директории с файлами правил
+            
+        Returns:
+            Словарь {filename: count} с количеством загруженных правил
+        """
+        import glob
+        results = {}
+        rules_path = os.path.join(rules_dir, '*.rules')
+        
+        for filepath in sorted(glob.glob(rules_path)):
+            filename = os.path.basename(filepath)
+            # Используем имя файла без расширения как категорию
+            category = os.path.splitext(filename)[0]
+            count = self.add_rules_from_file(filepath, category=category)
+            results[filename] = count
+            if count > 0:
+                print(f"[SuricataEngine] Loaded {count} rules from {filename}", file=sys.stderr)
+        
+        total = sum(results.values())
+        print(f"[SuricataEngine] Total: {total} rules from {len(results)} files", file=sys.stderr)
+        return results
+    
+    def get_available_rule_files(self, rules_dir: str) -> List[Dict]:
+        """
+        Получение списка доступных файлов правил
+        
+        Args:
+            rules_dir: Путь к директории с файлами правил
+            
+        Returns:
+            Список словарей с информацией о файлах
+        """
+        import glob
+        files = []
+        rules_path = os.path.join(rules_dir, '*.rules')
+        
+        for filepath in sorted(glob.glob(rules_path)):
+            filename = os.path.basename(filepath)
+            category = os.path.splitext(filename)[0]
+            
+            # Считаем правила в файле (с учётом \ продолжения строк)
+            total_rules = 0
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    accumulated = ""
+                    for line in f:
+                        stripped = line.rstrip('\n\r')
+                        if stripped.rstrip().endswith('\\'):
+                            accumulated += stripped.rstrip()[:-1].rstrip() + " "
+                            continue
+                        accumulated += stripped
+                        full_line = accumulated.strip()
+                        accumulated = ""
+                        if full_line and not full_line.startswith('#'):
+                            total_rules += 1
+                    if accumulated.strip() and not accumulated.strip().startswith('#'):
+                        total_rules += 1
+            except Exception:
+                pass
+            
+            # Проверяем, сколько правил из этого файла уже в БД
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT COUNT(*) FROM suricata_rules WHERE category = ?',
+                (category,)
+            )
+            loaded = cursor.fetchone()[0]
+            cursor.execute(
+                'SELECT COUNT(*) FROM suricata_rules WHERE category = ? AND enabled = 1',
+                (category,)
+            )
+            enabled = cursor.fetchone()[0]
+            conn.close()
+            
+            files.append({
+                'filename': filename,
+                'category': category,
+                'path': filepath,
+                'rules_in_file': total_rules,
+                'loaded': loaded,
+                'enabled': enabled,
+                'is_loaded': loaded > 0
+            })
+        
+        return files
+    
+    def delete_rules_by_category(self, category: str) -> int:
+        """Удаление всех правил определённой категории"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM suricata_rules WHERE category = ?', (category,))
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if affected > 0:
+            self._load_rules_from_db()
+        return affected
+    
+    def toggle_category(self, category: str, enabled: bool) -> int:
+        """Включение/выключение всех правил категории"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE suricata_rules SET enabled = ? WHERE category = ?',
+            (1 if enabled else 0, category)
+        )
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if affected > 0:
+            self._load_rules_from_db()
+        return affected
+    
+    def get_categories_stats(self) -> List[Dict]:
+        """Статистика правил по категориям"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT category,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as active
+            FROM suricata_rules
+            GROUP BY category
+            ORDER BY category
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [{'category': r[0], 'total': r[1], 'active': r[2]} for r in rows]
     
     def delete_rule(self, sid: int) -> bool:
         """Удаление правила по SID"""
