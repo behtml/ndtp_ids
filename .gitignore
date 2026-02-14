@@ -137,3 +137,5 @@ Thumbs.db
 *.db
 *.db-journal
 *.pcap
+logs/
+pids/
