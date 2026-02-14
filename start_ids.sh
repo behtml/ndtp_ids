@@ -186,13 +186,8 @@ start_collector_aggregator() {
     if [ "$RUN_COLLECTOR" = true ]; then
         print_info "Starting Packet Collector + Aggregator..."
         
-        if [ "$DEBUG_MODE" = true ]; then
-            sudo $PYTHON_CMD -m ndtp_ids.packet_collector --interface "$INTERFACE" 2>> "$LOG_DIR/collector.log" | \
-            $PYTHON_CMD -m ndtp_ids.aggregator --db "$DB_PATH" --window "$WINDOW" >> "$LOG_DIR/aggregator.log" 2>&1 &
-        else
-            sudo $PYTHON_CMD -m ndtp_ids.packet_collector --interface "$INTERFACE" 2>> "$LOG_DIR/collector.log" | \
-            $PYTHON_CMD -m ndtp_ids.aggregator --db "$DB_PATH" --window "$WINDOW" >> "$LOG_DIR/aggregator.log" 2>&1 &
-        fi
+        sudo $PYTHON_CMD -m ndtp_ids.packet_collector --interface "$INTERFACE" 2>> "$LOG_DIR/collector.log" | \
+        $PYTHON_CMD -m ndtp_ids.aggregator --db "$DB_PATH" --window "$WINDOW" >> "$LOG_DIR/aggregator.log" 2>&1 &
         
         COLLECTOR_PID=$!
         echo $COLLECTOR_PID > "$PID_DIR/collector_aggregator.pid"
@@ -205,13 +200,8 @@ start_collector_aggregator() {
 start_detector() {
     print_info "Starting Anomaly Detector..."
     
-    if [ "$DEBUG_MODE" = true ]; then
-        $PYTHON_CMD -m ndtp_ids.anomaly_detector --db "$DB_PATH" --threshold "$THRESHOLD" --interval 60 \
-            >> "$LOG_DIR/detector.log" 2>&1 &
-    else
-        $PYTHON_CMD -m ndtp_ids.anomaly_detector --db "$DB_PATH" --threshold "$THRESHOLD" --interval 60 \
-            >> "$LOG_DIR/detector.log" 2>&1 &
-    fi
+    $PYTHON_CMD -m ndtp_ids.anomaly_detector --db "$DB_PATH" --threshold "$THRESHOLD" --interval 60 \
+        >> "$LOG_DIR/detector.log" 2>&1 &
     
     DETECTOR_PID=$!
     echo $DETECTOR_PID > "$PID_DIR/detector.pid"
