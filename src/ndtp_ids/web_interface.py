@@ -654,7 +654,7 @@ def start_web_interface(host='127.0.0.1', port=5000, debug=False, db_path="ndtp_
     # Инициализация компонентов
     init_components()
     
-    logger.info(f"Запуск веб-интерфейса на http://{host}:{port}")
+    logger.info(f"Запуск в- за последний часеб-интерфейса на http://{host}:{port}")
     
     # Запуск Flask приложения
     app.run(host=host, port=port, debug=debug)

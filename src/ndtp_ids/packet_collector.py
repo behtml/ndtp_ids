@@ -82,4 +82,4 @@ if __name__ == "__main__":
     # Пример интерфейса:
     # Linux: eth0, wlan0
     # Windows: "Ethernet", "Wi-Fi"
-    start_collector(interface="eth0")
+    start_collector(interface="wlo1")
