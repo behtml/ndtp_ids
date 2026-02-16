@@ -15,6 +15,7 @@ try:
     from .adaptive_trainer import AdaptiveTrainer
     from .suricata_rules import SuricataRuleParser, DEFAULT_RULES
     from .suricata_engine import SuricataEngine
+    from .anomaly_detector import AnomalyDetector
 except ImportError:
     # Для запуска как standalone скрипт
     import sys
@@ -22,6 +23,28 @@ except ImportError:
     from adaptive_trainer import AdaptiveTrainer
     from suricata_rules import SuricataRuleParser, DEFAULT_RULES
     from suricata_engine import SuricataEngine
+    from anomaly_detector import AnomalyDetector
+
+# Опциональные модули ML (работают и без scikit-learn)
+try:
+    from ndtp_ids.ml_detector import MLAnomalyDetector
+    ML_AVAILABLE = True
+except ImportError:
+    try:
+        from ml_detector import MLAnomalyDetector
+        ML_AVAILABLE = True
+    except ImportError:
+        ML_AVAILABLE = False
+
+try:
+    from ndtp_ids.hybrid_scorer import HybridScorer
+    HYBRID_AVAILABLE = True
+except ImportError:
+    try:
+        from hybrid_scorer import HybridScorer
+        HYBRID_AVAILABLE = True
+    except ImportError:
+        HYBRID_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +59,14 @@ RULES_DIR = os.path.join(os.path.dirname(__file__), 'rules')
 trainer = None
 rule_parser = None
 suricata_engine = None
+anomaly_detector = None
+ml_detector = None
+hybrid_scorer = None
 
 
 def init_components():
     """Инициализация компонентов системы"""
-    global trainer, rule_parser, suricata_engine
+    global trainer, rule_parser, suricata_engine, anomaly_detector, ml_detector, hybrid_scorer
     
     trainer = AdaptiveTrainer(db_path=DB_PATH)
     rule_parser = SuricataRuleParser()
@@ -51,6 +77,26 @@ def init_components():
     # Инициализируем Suricata Engine с БД-хранилищем правил
     suricata_engine = SuricataEngine(db_path=DB_PATH)
     suricata_engine.load_default_rules()
+    
+    # Инициализируем детектор аномалий (z-score + ML)
+    anomaly_detector = AnomalyDetector(db_path=DB_PATH, z_threshold=3.0, use_ml=True)
+    logger.info("Anomaly detector initialized")
+    
+    # Инициализируем ML-детектор отдельно для API
+    if ML_AVAILABLE:
+        try:
+            ml_detector = MLAnomalyDetector(db_path=DB_PATH)
+            logger.info(f"ML detector initialized (trained={ml_detector.is_trained})")
+        except Exception as e:
+            logger.warning(f"ML detector failed: {e}")
+    
+    # Инициализируем гибридный скорер
+    if HYBRID_AVAILABLE:
+        try:
+            hybrid_scorer = HybridScorer(db_path=DB_PATH)
+            logger.info("Hybrid scorer initialized")
+        except Exception as e:
+            logger.warning(f"Hybrid scorer failed: {e}")
     
     # Автозагрузка правил из директории rules/
     if os.path.isdir(RULES_DIR):
@@ -709,6 +755,224 @@ def get_categories():
         return jsonify({'error': str(e)}), 500
 
 
+# ==================== API: Детектор аномалий (z-score) ====================
+
+@app.route('/api/anomaly/alerts')
+def get_anomaly_alerts():
+    """API: Получение алертов детектора аномалий (z-score)"""
+    try:
+        if anomaly_detector is None:
+            return jsonify({'error': 'Anomaly detector not initialized'}), 503
+        
+        limit = request.args.get('limit', 50, type=int)
+        severity = request.args.get('severity', None)
+        
+        alerts = anomaly_detector.get_recent_alerts(limit=limit, severity=severity)
+        return jsonify({'alerts': alerts, 'count': len(alerts)})
+    except Exception as e:
+        logger.error(f"Ошибка при получении алертов аномалий: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/anomaly/detect', methods=['POST'])
+def run_anomaly_detection():
+    """API: Запустить цикл детекции аномалий"""
+    try:
+        if anomaly_detector is None:
+            return jsonify({'error': 'Anomaly detector not initialized'}), 503
+        
+        anomaly_detector.run_detection()
+        return jsonify({'success': True, 'message': 'Detection cycle completed'})
+    except Exception as e:
+        logger.error(f"Ошибка при запуске детекции: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== API: ML-детектор (Isolation Forest) ====================
+
+@app.route('/api/ml/status')
+def get_ml_status():
+    """API: Статус ML-модели"""
+    try:
+        if ml_detector is None:
+            return jsonify({
+                'available': False,
+                'message': 'ML detector not available (install scikit-learn numpy)'
+            })
+        
+        status = ml_detector.get_model_status()
+        status['available'] = True
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Ошибка ML status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ml/train', methods=['POST'])
+def train_ml_model():
+    """API: Обучить/переобучить ML-модель"""
+    try:
+        if ml_detector is None:
+            return jsonify({'error': 'ML detector not available'}), 503
+        
+        data = request.get_json() or {}
+        force = data.get('force', False)
+        
+        result = ml_detector.train(force=force)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Ошибка обучения ML: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ml/alerts')
+def get_ml_alerts():
+    """API: Получение ML-алертов"""
+    try:
+        if ml_detector is None:
+            return jsonify({'alerts': [], 'count': 0, 'available': False})
+        
+        limit = request.args.get('limit', 50, type=int)
+        severity = request.args.get('severity', None)
+        src_ip = request.args.get('src_ip', None)
+        
+        alerts = ml_detector.get_recent_ml_alerts(
+            limit=limit, severity=severity, src_ip=src_ip
+        )
+        return jsonify({'alerts': alerts, 'count': len(alerts), 'available': True})
+    except Exception as e:
+        logger.error(f"Ошибка ML alerts: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ml/alerts/stats')
+def get_ml_alerts_stats():
+    """API: Статистика ML-алертов"""
+    try:
+        if ml_detector is None:
+            return jsonify({'available': False})
+        
+        stats = ml_detector.get_ml_alerts_stats()
+        stats['available'] = True
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Ошибка ML alerts stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ml/training-history')
+def get_ml_training_history():
+    """API: История обучений ML-модели"""
+    try:
+        if ml_detector is None:
+            return jsonify({'history': [], 'available': False})
+        
+        history = ml_detector.get_training_history()
+        return jsonify({'history': history, 'available': True})
+    except Exception as e:
+        logger.error(f"Ошибка ML training history: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ml/collect', methods=['POST'])
+def collect_ml_training_data():
+    """API: Собрать обучающие данные из aggregated_metrics"""
+    try:
+        if ml_detector is None:
+            return jsonify({'error': 'ML detector not available'}), 503
+        
+        added = ml_detector.collect_from_aggregated()
+        total = ml_detector.get_training_sample_count()
+        return jsonify({
+            'success': True,
+            'added': added,
+            'total_samples': total,
+            'min_required': ml_detector.min_training_samples
+        })
+    except Exception as e:
+        logger.error(f"Ошибка сбора данных ML: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== API: Гибридный скоринг ====================
+
+@app.route('/api/hybrid/status')
+def get_hybrid_status():
+    """API: Статус гибридного скорера (все три слоя)"""
+    try:
+        if hybrid_scorer is None:
+            return jsonify({
+                'available': False,
+                'message': 'Hybrid scorer not available'
+            })
+        
+        layers = hybrid_scorer.get_layer_status()
+        stats = hybrid_scorer.get_hybrid_stats()
+        return jsonify({
+            'available': True,
+            'layers': layers,
+            'stats': stats,
+            'weights': {
+                'suricata': hybrid_scorer.w_sig,
+                'stat': hybrid_scorer.w_stat,
+                'ml': hybrid_scorer.w_ml
+            }
+        })
+    except Exception as e:
+        logger.error(f"Ошибка hybrid status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/hybrid/verdicts')
+def get_hybrid_verdicts():
+    """API: Получение гибридных вердиктов"""
+    try:
+        if hybrid_scorer is None:
+            return jsonify({'verdicts': [], 'count': 0, 'available': False})
+        
+        limit = request.args.get('limit', 50, type=int)
+        severity = request.args.get('severity', None)
+        src_ip = request.args.get('src_ip', None)
+        
+        verdicts = hybrid_scorer.get_recent_verdicts(
+            limit=limit, severity=severity, src_ip=src_ip
+        )
+        return jsonify({'verdicts': verdicts, 'count': len(verdicts), 'available': True})
+    except Exception as e:
+        logger.error(f"Ошибка hybrid verdicts: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/hybrid/score', methods=['POST'])
+def run_hybrid_scoring():
+    """API: Запустить один цикл гибридного скоринга"""
+    try:
+        if hybrid_scorer is None:
+            return jsonify({'error': 'Hybrid scorer not available'}), 503
+        
+        hybrid_scorer.run_scoring_cycle()
+        return jsonify({'success': True, 'message': 'Scoring cycle completed'})
+    except Exception as e:
+        logger.error(f"Ошибка hybrid scoring: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/hybrid/train-ml', methods=['POST'])
+def hybrid_train_ml():
+    """API: Обучить ML-модель через гибридный скорер"""
+    try:
+        if hybrid_scorer is None:
+            return jsonify({'error': 'Hybrid scorer not available'}), 503
+        
+        result = hybrid_scorer.auto_train_ml()
+        if result is None:
+            return jsonify({'status': 'error', 'message': 'ML detector not available in scorer'})
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Ошибка обучения через hybrid: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/monitoring')
 def monitoring():
     """Страница мониторинга в реальном времени"""
@@ -735,8 +999,14 @@ def rules():
 
 @app.route('/training')
 def training():
-    """Страница управления обучением"""
+    """Страница управления обучением и ML"""
     return render_template('training.html')
+
+
+@app.route('/hybrid')
+def hybrid():
+    """Страница гибридного анализа (три слоя)"""
+    return render_template('hybrid.html')
 
 
 def start_web_interface(host='127.0.0.1', port=5000, debug=False, db_path="ids.db"):

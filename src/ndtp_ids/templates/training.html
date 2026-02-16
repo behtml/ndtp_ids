@@ -2,43 +2,322 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>IDS - Управление обучением</title>
+    <title>IDS - Управление обучением и ML</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f1923; color: #c5d0dc; padding: 20px; }
+        a { color: #4fc3f7; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        h1 { color: #e0e6ed; margin-bottom: 10px; }
+        h2 { color: #81d4fa; margin-bottom: 10px; font-size: 1.1em; }
+        .nav { margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; }
+        .nav a { padding: 6px 14px; background: #1a2632; border-radius: 6px; border: 1px solid #2a3a4a; }
+        .nav a:hover { background: #243447; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 16px; margin-top: 16px; }
+        .card { background: #1a2632; border: 1px solid #2a3a4a; border-radius: 8px; padding: 16px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a3a4a; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #8899aa; }
+        .stat-value { color: #e0e6ed; font-weight: 600; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8em; font-weight: 600; }
+        .badge-ok { background: #1b5e20; color: #81c784; }
+        .badge-warn { background: #e65100; color: #ffb74d; }
+        .badge-off { background: #37474f; color: #90a4ae; }
+        .badge-critical { background: #b71c1c; color: #ef9a9a; }
+        .badge-high { background: #e65100; color: #ffb74d; }
+        .badge-medium { background: #f57f17; color: #fff176; }
+        .badge-low { background: #1565c0; color: #90caf9; }
+        .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: 600; transition: 0.2s; }
+        .btn-primary { background: #1976d2; color: white; }
+        .btn-primary:hover { background: #1565c0; }
+        .btn-success { background: #2e7d32; color: white; }
+        .btn-success:hover { background: #1b5e20; }
+        .btn-warning { background: #e65100; color: white; }
+        .btn-warning:hover { background: #bf360c; }
+        .progress-bar { width: 100%; height: 8px; background: #37474f; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+        .progress-fill { height: 100%; background: #4caf50; border-radius: 4px; transition: width 0.3s; }
+        .alert-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .alert-table th { text-align: left; padding: 8px; color: #81d4fa; border-bottom: 2px solid #2a3a4a; font-size: 0.85em; }
+        .alert-table td { padding: 8px; border-bottom: 1px solid #1e2d3d; font-size: 0.85em; }
+        .msg { padding: 10px; border-radius: 6px; margin: 10px 0; }
+        .msg-info { background: #0d47a1; color: #90caf9; }
+        .msg-success { background: #1b5e20; color: #81c784; }
+        .msg-error { background: #b71c1c; color: #ef9a9a; }
+        .host-card { background: #1e2d3d; padding: 12px; border-radius: 6px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; }
+        #result-msg { margin-top: 12px; }
+    </style>
 </head>
-<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
-    <h1>Управление режимом обучения</h1>
-    <a href="/">← Назад</a>
-    <div style="background: white; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <h2>Статистика обучения</h2>
-        <div id="training-stats"></div>
+<body>
+    <h1>Управление обучением и ML-моделью</h1>
+    <div class="nav">
+        <a href="/">Дашборд</a>
+        <a href="/monitoring">Мониторинг</a>
+        <a href="/alerts">Алерты</a>
+        <a href="/hosts">Хосты</a>
+        <a href="/rules">Правила</a>
+        <a href="/training">Обучение</a>
+        <a href="/hybrid">Гибридный анализ</a>
     </div>
-    <div id="hosts-training" style="margin-top: 20px;"></div>
+
+    <div class="grid">
+        <!-- ML Model Status -->
+        <div class="card">
+            <h2>ML-модель (Isolation Forest)</h2>
+            <div id="ml-status">Загрузка...</div>
+            <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="collectData()">Собрать данные</button>
+                <button class="btn btn-success" onclick="trainModel(false)">Обучить</button>
+                <button class="btn btn-warning" onclick="trainModel(true)">Переобучить</button>
+            </div>
+            <div id="result-msg"></div>
+        </div>
+
+        <!-- Training Stats -->
+        <div class="card">
+            <h2>Статистика обучения</h2>
+            <div id="training-stats">Загрузка...</div>
+        </div>
+
+        <!-- ML Alerts Stats -->
+        <div class="card">
+            <h2>ML-алерты</h2>
+            <div id="ml-alerts-stats">Загрузка...</div>
+        </div>
+
+        <!-- Training History -->
+        <div class="card">
+            <h2>История обучений</h2>
+            <div id="training-history">Загрузка...</div>
+        </div>
+    </div>
+
+    <!-- Hosts Training Status -->
+    <div class="card" style="margin-top: 16px;">
+        <h2>Хосты — режим обучения</h2>
+        <div id="hosts-training">Загрузка...</div>
+    </div>
+
+    <!-- Recent ML Alerts -->
+    <div class="card" style="margin-top: 16px;">
+        <h2>Последние ML-алерты</h2>
+        <div id="ml-alerts-list">Загрузка...</div>
+    </div>
+
     <script>
-        function loadData() {
-            fetch('/api/stats').then(r => r.json()).then(data => {
-                document.getElementById('training-stats').innerHTML = `
-                    <p>Всего хостов: ${data.total_hosts}</p>
-                    <p>В режиме обучения: ${data.learning_hosts}</p>
-                    <p>В режиме детекции: ${data.detection_hosts}</p>
-                `;
-            });
-            
-            fetch('/api/hosts').then(r => r.json()).then(data => {
-                document.getElementById('hosts-training').innerHTML = data.hosts.map(h => 
-                    `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px;">
-                        <strong>${h.src_ip}</strong>
-                        <span style="color: ${h.is_learning ? '#f39c12' : '#2ecc71'};">
-                            ${h.is_learning ? '🟡 Обучение' : '🟢 Детекция'}
-                        </span>
-                        <div style="margin-top: 10px;">
-                            Наблюдений: ${h.samples_count} | 
-                            Соединений (среднее): ${h.connections_mean}
-                        </div>
-                    </div>`
-                ).join('');
-            });
+        function showMsg(text, type) {
+            const el = document.getElementById('result-msg');
+            el.innerHTML = `<div class="msg msg-${type}">${text}</div>`;
+            setTimeout(() => el.innerHTML = '', 5000);
         }
-        loadData();
-        setInterval(loadData, 5000);
+
+        function severityBadge(sev) {
+            return `<span class="badge badge-${sev || 'low'}">${(sev || 'low').toUpperCase()}</span>`;
+        }
+
+        async function loadMLStatus() {
+            try {
+                const res = await fetch('/api/ml/status');
+                const data = await res.json();
+                const el = document.getElementById('ml-status');
+                
+                if (!data.available) {
+                    el.innerHTML = '<div class="msg msg-error">ML недоступен. Установите: pip install scikit-learn numpy</div>';
+                    return;
+                }
+
+                const pct = Math.min(100, Math.round((data.training_samples / data.min_required) * 100));
+                el.innerHTML = `
+                    <div class="stat-row">
+                        <span class="stat-label">Статус модели</span>
+                        <span class="stat-value">${data.is_trained 
+                            ? '<span class="badge badge-ok">Обучена</span>' 
+                            : '<span class="badge badge-warn">Не обучена</span>'}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Обучающих наблюдений</span>
+                        <span class="stat-value">${data.training_samples} / ${data.min_required}</span>
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                    <div class="stat-row">
+                        <span class="stat-label">Alpha (вес z-score)</span>
+                        <span class="stat-value">${data.alpha}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Contamination</span>
+                        <span class="stat-value">${data.contamination}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Файл модели</span>
+                        <span class="stat-value" style="font-size:0.85em">${data.model_path}</span>
+                    </div>
+                `;
+            } catch(e) {
+                document.getElementById('ml-status').innerHTML = '<span class="badge badge-off">Ошибка загрузки</span>';
+            }
+        }
+
+        async function loadTrainingStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                document.getElementById('training-stats').innerHTML = `
+                    <div class="stat-row"><span class="stat-label">Всего хостов</span><span class="stat-value">${data.total_hosts}</span></div>
+                    <div class="stat-row"><span class="stat-label">В режиме обучения</span><span class="stat-value">${data.learning_hosts}</span></div>
+                    <div class="stat-row"><span class="stat-label">В режиме детекции</span><span class="stat-value">${data.detection_hosts}</span></div>
+                    <div class="stat-row"><span class="stat-label">Всего алертов</span><span class="stat-value">${data.total_alerts}</span></div>
+                    <div class="stat-row"><span class="stat-label">Алертов за час</span><span class="stat-value">${data.recent_alerts}</span></div>
+                `;
+            } catch(e) {
+                document.getElementById('training-stats').innerHTML = 'Ошибка';
+            }
+        }
+
+        async function loadMLAlertsStats() {
+            try {
+                const res = await fetch('/api/ml/alerts/stats');
+                const data = await res.json();
+                if (!data.available) {
+                    document.getElementById('ml-alerts-stats').innerHTML = '<span class="badge badge-off">ML недоступен</span>';
+                    return;
+                }
+                const bySev = data.by_severity || {};
+                document.getElementById('ml-alerts-stats').innerHTML = `
+                    <div class="stat-row"><span class="stat-label">Всего ML-алертов</span><span class="stat-value">${data.total}</span></div>
+                    <div class="stat-row"><span class="stat-label">За последний час</span><span class="stat-value">${data.last_hour}</span></div>
+                    <div class="stat-row"><span class="stat-label">Средний combined score</span><span class="stat-value">${data.avg_combined_score}</span></div>
+                    <div class="stat-row"><span class="stat-label">По severity</span>
+                        <span class="stat-value">${Object.entries(bySev).map(([k,v]) => `${k}: ${v}`).join(', ') || '—'}</span>
+                    </div>
+                `;
+            } catch(e) {
+                document.getElementById('ml-alerts-stats').innerHTML = 'Ошибка';
+            }
+        }
+
+        async function loadTrainingHistory() {
+            try {
+                const res = await fetch('/api/ml/training-history');
+                const data = await res.json();
+                if (!data.available || !data.history.length) {
+                    document.getElementById('training-history').innerHTML = '<span style="color:#546e7a">Ещё нет обучений</span>';
+                    return;
+                }
+                document.getElementById('training-history').innerHTML = data.history.map(h => `
+                    <div class="stat-row">
+                        <span class="stat-label">${h.trained_at}</span>
+                        <span class="stat-value">${h.n_samples} samples, ${h.n_features} features</span>
+                    </div>
+                `).join('');
+            } catch(e) {
+                document.getElementById('training-history').innerHTML = 'Ошибка';
+            }
+        }
+
+        async function loadHosts() {
+            try {
+                const res = await fetch('/api/hosts');
+                const data = await res.json();
+                document.getElementById('hosts-training').innerHTML = data.hosts.map(h => `
+                    <div class="host-card">
+                        <div>
+                            <strong>${h.src_ip}</strong>
+                            ${h.is_learning 
+                                ? '<span class="badge badge-warn">Обучение</span>' 
+                                : '<span class="badge badge-ok">Детекция</span>'}
+                            <div style="color:#546e7a;font-size:0.85em;margin-top:4px">
+                                Наблюдений: ${h.samples_count} | Соединений (avg): ${h.connections_mean}
+                            </div>
+                        </div>
+                    </div>
+                `).join('') || '<span style="color:#546e7a">Нет хостов</span>';
+            } catch(e) {
+                document.getElementById('hosts-training').innerHTML = 'Ошибка';
+            }
+        }
+
+        async function loadMLAlerts() {
+            try {
+                const res = await fetch('/api/ml/alerts?limit=20');
+                const data = await res.json();
+                if (!data.alerts || !data.alerts.length) {
+                    document.getElementById('ml-alerts-list').innerHTML = '<span style="color:#546e7a">Нет ML-алертов</span>';
+                    return;
+                }
+                document.getElementById('ml-alerts-list').innerHTML = `
+                    <table class="alert-table">
+                        <thead><tr>
+                            <th>Время</th><th>IP</th><th>Тип</th>
+                            <th>ML</th><th>Stat</th><th>Combined</th><th>Severity</th>
+                        </tr></thead>
+                        <tbody>${data.alerts.map(a => `
+                            <tr>
+                                <td>${a.timestamp_fmt}</td>
+                                <td>${a.src_ip}</td>
+                                <td>${a.anomaly_type}</td>
+                                <td>${(a.ml_score||0).toFixed(3)}</td>
+                                <td>${(a.stat_score||0).toFixed(3)}</td>
+                                <td><strong>${(a.combined_score||0).toFixed(3)}</strong></td>
+                                <td>${severityBadge(a.severity)}</td>
+                            </tr>
+                        `).join('')}</tbody>
+                    </table>
+                `;
+            } catch(e) {
+                document.getElementById('ml-alerts-list').innerHTML = 'Ошибка';
+            }
+        }
+
+        async function collectData() {
+            try {
+                const res = await fetch('/api/ml/collect', {method: 'POST'});
+                const data = await res.json();
+                if (data.success) {
+                    showMsg(`Собрано: +${data.added} записей (всего: ${data.total_samples}/${data.min_required})`, 'success');
+                } else {
+                    showMsg(data.error || data.message || 'Ошибка', 'error');
+                }
+                loadMLStatus();
+            } catch(e) {
+                showMsg('Ошибка сбора данных', 'error');
+            }
+        }
+
+        async function trainModel(force) {
+            try {
+                showMsg('Обучение модели...', 'info');
+                const res = await fetch('/api/ml/train', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({force: force})
+                });
+                const data = await res.json();
+                
+                if (data.status === 'trained') {
+                    showMsg(`Модель обучена! Samples: ${data.n_samples}, Аномалий в обучении: ${data.anomalies_in_training}`, 'success');
+                } else if (data.status === 'insufficient_data') {
+                    showMsg(`Недостаточно данных: ${data.current_samples}/${data.required_samples}. Соберите больше трафика.`, 'error');
+                } else if (data.status === 'already_trained') {
+                    showMsg('Модель уже обучена. Нажмите "Переобучить" для принудительного переобучения.', 'info');
+                } else {
+                    showMsg(data.message || 'Неизвестный результат', 'error');
+                }
+                loadAll();
+            } catch(e) {
+                showMsg('Ошибка обучения', 'error');
+            }
+        }
+
+        function loadAll() {
+            loadMLStatus();
+            loadTrainingStats();
+            loadMLAlertsStats();
+            loadTrainingHistory();
+            loadHosts();
+            loadMLAlerts();
+        }
+
+        loadAll();
+        setInterval(loadAll, 10000);
     </script>
 </body>
 </html>

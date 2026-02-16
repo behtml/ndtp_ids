@@ -1,6 +1,7 @@
 """
 Детектор аномалий
-Использует статистические методы (z-score) для обнаружения аномального поведения в сети
+Использует статистические методы (z-score) для обнаружения аномального поведения в сети.
+Поддерживает гибридный режим с ML-детектором (Isolation Forest).
 """
 import sqlite3
 import json
@@ -9,6 +10,17 @@ from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import math
+
+# Импорт ML-детектора (опциональный — работает и без scikit-learn)
+try:
+    from ndtp_ids.ml_detector import MLAnomalyDetector
+    ML_AVAILABLE = True
+except ImportError:
+    try:
+        from ml_detector import MLAnomalyDetector
+        ML_AVAILABLE = True
+    except ImportError:
+        ML_AVAILABLE = False
 
 
 @dataclass
@@ -34,17 +46,34 @@ class AnomalyDetector:
     для каждого хоста и детектирует аномалии при значительных отклонениях.
     """
     
-    def __init__(self, db_path: str = "ids.db", z_threshold: float = 3.0):
+    def __init__(self, db_path: str = "ids.db", z_threshold: float = 3.0,
+                 use_ml: bool = True):
         """
         Инициализация детектора
         
         Args:
             db_path: Путь к базе данных SQLite
             z_threshold: Порог z-score для определения аномалии (обычно 2-3)
+            use_ml: Использовать гибридный ML-детектор (если доступен)
         """
         self.db_path = db_path
         self.z_threshold = z_threshold
+        self.ml_detector = None
         self.init_database()
+        
+        # Инициализация ML-детектора
+        if use_ml and ML_AVAILABLE:
+            try:
+                self.ml_detector = MLAnomalyDetector(
+                    db_path=db_path,
+                    z_threshold=z_threshold
+                )
+                print(f"[AnomalyDetector] ML hybrid detector enabled "
+                      f"(trained={self.ml_detector.is_trained})", file=sys.stderr)
+            except Exception as e:
+                print(f"[AnomalyDetector] ML detector failed to init: {e}", file=sys.stderr)
+        elif use_ml and not ML_AVAILABLE:
+            print("[AnomalyDetector] ML not available (install scikit-learn + numpy)", file=sys.stderr)
         
     def init_database(self):
         """Инициализация таблиц для профилей устройств и алертов"""
@@ -395,7 +424,8 @@ class AnomalyDetector:
     
     def run_detection(self):
         """
-        Запуск детектора для анализа последних метрик
+        Запуск детектора для анализа последних метрик.
+        Если ML-детектор доступен — также запускает гибридную детекцию.
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -427,26 +457,50 @@ class AnomalyDetector:
                 'window_end': window_end
             }
             
+            metrics_dict = {}
             # Заполняем данные метрик
             for metric_name, metric_value in cursor.fetchall():
                 window_data[metric_name] = metric_value
+                metrics_dict[metric_name] = metric_value
             
             # Проверяем что у нас есть необходимые метрики
             required_metrics = ['connections_count', 'unique_ports', 'unique_dst_ips', 'total_bytes']
             if not all(m in window_data for m in required_metrics):
                 continue
             
-            # Анализируем на аномалии
+            # --- Слой 1: Z-Score (статистический анализ) ---
             alerts = self.analyze_window(window_data)
             
             for alert in alerts:
                 self.save_alert(alert)
-                print(f"[ALERT] {alert.severity.upper()}: {alert.description}", file=sys.stderr)
+                print(f"[STAT-ALERT] {alert.severity.upper()}: {alert.description}", file=sys.stderr)
+            
+            # --- Слой 2: ML (Isolation Forest) гибридная детекция ---
+            if self.ml_detector is not None:
+                try:
+                    # Пополняем обучающие данные
+                    self.ml_detector.collect_training_data(src_ip, metrics_dict)
+                    
+                    # Запускаем ML-детекцию
+                    ml_alert = self.ml_detector.detect(src_ip, metrics_dict)
+                    if ml_alert:
+                        self.ml_detector.save_ml_alert(ml_alert)
+                        print(f"[ML-ALERT] {ml_alert.severity.upper()}: {ml_alert.description}",
+                              file=sys.stderr)
+                except Exception as e:
+                    print(f"[AnomalyDetector] ML detection error: {e}", file=sys.stderr)
             
             # Обновляем профиль хоста
             self.update_host_profile(src_ip)
         
         conn.close()
+        
+        # Попытка автообучения ML если ещё не обучен
+        if self.ml_detector is not None and not self.ml_detector.is_trained:
+            try:
+                self.ml_detector.train()
+            except Exception as e:
+                print(f"[AnomalyDetector] ML auto-train error: {e}", file=sys.stderr)
 
 
 def run_detector(db_path: str = "ids.db", z_threshold: float = 3.0, 

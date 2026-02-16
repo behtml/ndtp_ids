@@ -4,7 +4,16 @@ import time
 import json
 import socket
 
-LOCAL_NET_PREFIX = ""  # можно изменить под вашу сеть
+# Список локальных подсетей (RFC 1918 + loopback)
+LOCAL_PREFIXES = [
+    "10.",
+    "172.16.", "172.17.", "172.18.", "172.19.",
+    "172.20.", "172.21.", "172.22.", "172.23.",
+    "172.24.", "172.25.", "172.26.", "172.27.",
+    "172.28.", "172.29.", "172.30.", "172.31.",
+    "192.168.",
+    "127.",
+]
 
 
 @dataclass
@@ -19,13 +28,30 @@ class PacketEvent:
     direction: str
 
 
-def get_direction(src_ip: str) -> str:
+def is_local_ip(ip: str) -> bool:
+    """Проверяет, является ли IP локальным (RFC 1918 / loopback)"""
+    return any(ip.startswith(prefix) for prefix in LOCAL_PREFIXES)
+
+
+def get_direction(src_ip: str, dst_ip: str) -> str:
     """
-    Определяем направление трафика относительно локальной сети
+    Определяем направление трафика:
+    - out: из локальной сети наружу
+    - in: из внешней сети внутрь
+    - internal: оба адреса локальные
+    - external: оба адреса внешние (транзит / захват на шлюзе)
     """
-    if src_ip.startswith(LOCAL_NET_PREFIX):
+    src_local = is_local_ip(src_ip)
+    dst_local = is_local_ip(dst_ip)
+    
+    if src_local and dst_local:
+        return "internal"
+    elif src_local and not dst_local:
         return "out"
-    return "in"
+    elif not src_local and dst_local:
+        return "in"
+    else:
+        return "external"
 
 
 def process_packet(packet):
@@ -57,7 +83,7 @@ def process_packet(packet):
         dst_port=dst_port,
         protocol=protocol,
         packet_size=len(packet),
-        direction=get_direction(ip.src)
+        direction=get_direction(ip.src, ip.dst)
     )
 
     emit_event(event)
@@ -65,22 +91,37 @@ def process_packet(packet):
 
 def emit_event(event: PacketEvent):
     """
-    Здесь мы пока просто печатаем событие в JSON.
-    Позже заменим на очередь / БД / сокет.
+     печатаем событие в JSON.
     """
     print(json.dumps(asdict(event), ensure_ascii=False))
 
 
-def start_collector(interface: str):
-    print(f"[+] Starting packet collector on {interface}")
-    sniff(
-        iface=interface,
-        prn=process_packet,
-        store=False
-    )
+def start_collector(interface: str = None):
+    """
+    Запуск сборщика пакетов.
+    
+    Args:
+        interface: Сетевой интерфейс. Если None — слушает на всех интерфейсах.
+    """
+    if interface:
+        print(f"[+] Starting packet collector on {interface}")
+        sniff(iface=interface, prn=process_packet, store=False)
+    else:
+        print(f"[+] Starting packet collector on ALL interfaces")
+        sniff(prn=process_packet, store=False)
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Packet Collector — сбор сетевых пакетов")
+    parser.add_argument(
+        "--iface", "-i",
+        default=None,
+        help="Сетевой интерфейс (по умолчанию: все интерфейсы)"
+    )
+    args = parser.parse_args()
+    
     # Linux: eth0, wlan0
     # Windows: "Ethernet", "Wi-Fi"
-    start_collector(interface="wlo1")
+    start_collector(interface=args.iface)

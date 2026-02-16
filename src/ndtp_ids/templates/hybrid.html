@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>IDS - Гибридный анализ</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f1923; color: #c5d0dc; padding: 20px; }
+        a { color: #4fc3f7; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        h1 { color: #e0e6ed; margin-bottom: 10px; }
+        h2 { color: #81d4fa; margin-bottom: 10px; font-size: 1.1em; }
+        .nav { margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; }
+        .nav a { padding: 6px 14px; background: #1a2632; border-radius: 6px; border: 1px solid #2a3a4a; }
+        .nav a:hover { background: #243447; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+        .card { background: #1a2632; border: 1px solid #2a3a4a; border-radius: 8px; padding: 16px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a3a4a; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #8899aa; }
+        .stat-value { color: #e0e6ed; font-weight: 600; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8em; font-weight: 600; }
+        .badge-ok { background: #1b5e20; color: #81c784; }
+        .badge-warn { background: #e65100; color: #ffb74d; }
+        .badge-off { background: #37474f; color: #90a4ae; }
+        .badge-critical { background: #b71c1c; color: #ef9a9a; }
+        .badge-high { background: #e65100; color: #ffb74d; }
+        .badge-medium { background: #f57f17; color: #fff176; }
+        .badge-low { background: #1565c0; color: #90caf9; }
+        .badge-info { background: #1a237e; color: #9fa8da; }
+        .badge-none { background: #263238; color: #78909c; }
+        .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: 600; transition: 0.2s; }
+        .btn-primary { background: #1976d2; color: white; }
+        .btn-primary:hover { background: #1565c0; }
+        .btn-success { background: #2e7d32; color: white; }
+        .btn-success:hover { background: #1b5e20; }
+        .layer-card { background: #1e2d3d; padding: 14px; border-radius: 8px; margin: 8px 0; border-left: 4px solid #37474f; }
+        .layer-card.active { border-left-color: #4caf50; }
+        .layer-card.inactive { border-left-color: #f44336; opacity: 0.7; }
+        .score-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+        .score-track { flex: 1; height: 6px; background: #37474f; border-radius: 3px; overflow: hidden; }
+        .score-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+        .score-sig { background: #f44336; }
+        .score-stat { background: #ff9800; }
+        .score-ml { background: #2196f3; }
+        .score-combined { background: #9c27b0; }
+        .alert-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .alert-table th { text-align: left; padding: 8px; color: #81d4fa; border-bottom: 2px solid #2a3a4a; font-size: 0.85em; }
+        .alert-table td { padding: 8px; border-bottom: 1px solid #1e2d3d; font-size: 0.85em; }
+        .msg { padding: 10px; border-radius: 6px; margin: 10px 0; }
+        .msg-info { background: #0d47a1; color: #90caf9; }
+        .msg-success { background: #1b5e20; color: #81c784; }
+        .msg-error { background: #b71c1c; color: #ef9a9a; }
+        .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0; font-size: 0.85em; }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        #result-msg { margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Гибридный анализ — три слоя детекции</h1>
+    <div class="nav">
+        <a href="/">Дашборд</a>
+        <a href="/monitoring">Мониторинг</a>
+        <a href="/alerts">Алерты</a>
+        <a href="/hosts">Хосты</a>
+        <a href="/rules">Правила</a>
+        <a href="/training">Обучение</a>
+        <a href="/hybrid">Гибридный анализ</a>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#f44336"></div> Suricata (сигнатуры)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff9800"></div> Z-Score (статистика)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2196f3"></div> ML (Isolation Forest)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#9c27b0"></div> Combined</div>
+    </div>
+
+    <div class="grid">
+        <!-- Layers Status -->
+        <div class="card">
+            <h2>Слои детекции</h2>
+            <div id="layers-status">Загрузка...</div>
+        </div>
+
+        <!-- Hybrid Stats -->
+        <div class="card">
+            <h2>Статистика</h2>
+            <div id="hybrid-stats">Загрузка...</div>
+        </div>
+
+        <!-- Weights -->
+        <div class="card">
+            <h2>Веса скоринга</h2>
+            <div id="weights-info">Загрузка...</div>
+            <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="runScoring()">Запустить скоринг</button>
+                <button class="btn btn-success" onclick="trainML()">Обучить ML</button>
+            </div>
+            <div id="result-msg"></div>
+        </div>
+    </div>
+
+    <!-- Verdicts -->
+    <div class="card" style="margin-top: 16px;">
+        <h2>Последние гибридные вердикты</h2>
+        <div id="verdicts-list">Загрузка...</div>
+    </div>
+
+    <script>
+        function showMsg(text, type) {
+            const el = document.getElementById('result-msg');
+            el.innerHTML = `<div class="msg msg-${type}">${text}</div>`;
+            setTimeout(() => el.innerHTML = '', 5000);
+        }
+
+        function severityBadge(sev) {
+            return `<span class="badge badge-${sev || 'info'}">${(sev || 'info').toUpperCase()}</span>`;
+        }
+
+        function confBadge(conf) {
+            const colors = {high: 'ok', medium: 'warn', low: 'off', none: 'none'};
+            return `<span class="badge badge-${colors[conf]||'none'}">${(conf||'none').toUpperCase()}</span>`;
+        }
+
+        function scoreBar(value, cls) {
+            const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
+            return `<div class="score-bar">
+                <div class="score-track"><div class="score-fill ${cls}" style="width:${pct}%"></div></div>
+                <span style="font-size:0.8em;min-width:45px">${value.toFixed(3)}</span>
+            </div>`;
+        }
+
+        async function loadStatus() {
+            try {
+                const res = await fetch('/api/hybrid/status');
+                const data = await res.json();
+
+                if (!data.available) {
+                    document.getElementById('layers-status').innerHTML = '<div class="msg msg-error">Гибридный скорер недоступен</div>';
+                    document.getElementById('hybrid-stats').innerHTML = '';
+                    document.getElementById('weights-info').innerHTML = '';
+                    return;
+                }
+
+                // Layers
+                const layers = data.layers;
+                document.getElementById('layers-status').innerHTML = `
+                    <div class="layer-card ${layers.suricata.active ? 'active' : 'inactive'}">
+                        <strong>Suricata (сигнатурный)</strong>
+                        <span class="badge ${layers.suricata.active ? 'badge-ok' : 'badge-off'}">${layers.suricata.active ? 'ACTIVE' : 'OFF'}</span>
+                        <div class="stat-row">
+                            <span class="stat-label">Вес</span>
+                            <span class="stat-value">${layers.suricata.weight}</span>
+                        </div>
+                        ${layers.suricata.info.total !== undefined ? `
+                        <div class="stat-row">
+                            <span class="stat-label">Правил</span>
+                            <span class="stat-value">${layers.suricata.info.active || 0} / ${layers.suricata.info.total || 0}</span>
+                        </div>` : ''}
+                    </div>
+                    <div class="layer-card ${layers.stat.active ? 'active' : 'inactive'}">
+                        <strong>Z-Score (статистический)</strong>
+                        <span class="badge ${layers.stat.active ? 'badge-ok' : 'badge-off'}">${layers.stat.active ? 'ACTIVE' : 'OFF'}</span>
+                        <div class="stat-row">
+                            <span class="stat-label">Вес</span>
+                            <span class="stat-value">${layers.stat.weight}</span>
+                        </div>
+                        ${layers.stat.info.z_threshold ? `
+                        <div class="stat-row">
+                            <span class="stat-label">Порог z-score</span>
+                            <span class="stat-value">${layers.stat.info.z_threshold}</span>
+                        </div>` : ''}
+                    </div>
+                    <div class="layer-card ${layers.ml.active ? 'active' : 'inactive'}">
+                        <strong>Isolation Forest (ML)</strong>
+                        <span class="badge ${layers.ml.active ? 'badge-ok' : 'badge-off'}">${layers.ml.active ? 'TRAINED' : 'NOT TRAINED'}</span>
+                        <div class="stat-row">
+                            <span class="stat-label">Вес</span>
+                            <span class="stat-value">${layers.ml.weight}</span>
+                        </div>
+                        ${layers.ml.info.training_samples !== undefined ? `
+                        <div class="stat-row">
+                            <span class="stat-label">Обучающих данных</span>
+                            <span class="stat-value">${layers.ml.info.training_samples} / ${layers.ml.info.min_required}</span>
+                        </div>` : ''}
+                    </div>
+                `;
+
+                // Stats
+                const stats = data.stats;
+                const bySev = stats.by_severity || {};
+                const byConf = stats.by_confidence || {};
+                document.getElementById('hybrid-stats').innerHTML = `
+                    <div class="stat-row"><span class="stat-label">Всего вердиктов</span><span class="stat-value">${stats.total_verdicts}</span></div>
+                    <div class="stat-row"><span class="stat-label">За последний час</span><span class="stat-value">${stats.last_hour}</span></div>
+                    <div class="stat-row"><span class="stat-label">Средние скоры (1ч)</span><span class="stat-value"></span></div>
+                    ${scoreBar(stats.avg_scores.suricata || 0, 'score-sig')}
+                    ${scoreBar(stats.avg_scores.stat || 0, 'score-stat')}
+                    ${scoreBar(stats.avg_scores.ml || 0, 'score-ml')}
+                    ${scoreBar(stats.avg_scores.combined || 0, 'score-combined')}
+                    <div class="stat-row"><span class="stat-label">По severity</span>
+                        <span class="stat-value">${Object.entries(bySev).map(([k,v]) => `${k}: ${v}`).join(', ') || '—'}</span>
+                    </div>
+                    <div class="stat-row"><span class="stat-label">По confidence</span>
+                        <span class="stat-value">${Object.entries(byConf).map(([k,v]) => `${k}: ${v}`).join(', ') || '—'}</span>
+                    </div>
+                `;
+
+                // Weights formula
+                const w = data.weights;
+                document.getElementById('weights-info').innerHTML = `
+                    <div style="background:#0d1b2a;padding:12px;border-radius:6px;font-family:monospace;font-size:0.9em;margin-bottom:8px">
+                        combined = ${w.suricata} × SIG + ${w.stat} × STAT + ${w.ml} × ML
+                    </div>
+                    <div class="stat-row"><span class="stat-label">Consensus boost 2/3</span><span class="stat-value">×1.15</span></div>
+                    <div class="stat-row"><span class="stat-label">Consensus boost 3/3</span><span class="stat-value">×1.30</span></div>
+                `;
+            } catch(e) {
+                document.getElementById('layers-status').innerHTML = '<span class="badge badge-off">Ошибка загрузки</span>';
+            }
+        }
+
+        async function loadVerdicts() {
+            try {
+                const res = await fetch('/api/hybrid/verdicts?limit=30');
+                const data = await res.json();
+                if (!data.verdicts || !data.verdicts.length) {
+                    document.getElementById('verdicts-list').innerHTML = '<span style="color:#546e7a">Нет вердиктов. Нажмите "Запустить скоринг".</span>';
+                    return;
+                }
+                document.getElementById('verdicts-list').innerHTML = `
+                    <table class="alert-table">
+                        <thead><tr>
+                            <th>Время</th><th>IP</th>
+                            <th>SIG</th><th>STAT</th><th>ML</th><th>Combined</th>
+                            <th>Severity</th><th>Confidence</th>
+                        </tr></thead>
+                        <tbody>${data.verdicts.map(v => `
+                            <tr>
+                                <td>${v.time_str}</td>
+                                <td>${v.src_ip}</td>
+                                <td>${(v.suricata_score||0).toFixed(2)}</td>
+                                <td>${(v.stat_score||0).toFixed(2)}</td>
+                                <td>${(v.ml_score||0).toFixed(2)}</td>
+                                <td><strong>${(v.combined_score||0).toFixed(3)}</strong></td>
+                                <td>${severityBadge(v.severity)}</td>
+                                <td>${confBadge(v.confidence)}</td>
+                            </tr>
+                        `).join('')}</tbody>
+                    </table>
+                `;
+            } catch(e) {
+                document.getElementById('verdicts-list').innerHTML = 'Ошибка';
+            }
+        }
+
+        async function runScoring() {
+            try {
+                showMsg('Запуск гибридного скоринга...', 'info');
+                const res = await fetch('/api/hybrid/score', {method: 'POST'});
+                const data = await res.json();
+                if (data.success) {
+                    showMsg('Цикл скоринга завершён', 'success');
+                } else {
+                    showMsg(data.error || 'Ошибка', 'error');
+                }
+                loadAll();
+            } catch(e) {
+                showMsg('Ошибка запуска', 'error');
+            }
+        }
+
+        async function trainML() {
+            try {
+                showMsg('Обучение ML-модели...', 'info');
+                const res = await fetch('/api/hybrid/train-ml', {method: 'POST'});
+                const data = await res.json();
+                if (data.status === 'trained') {
+                    showMsg(`ML обучена: ${data.n_samples} samples`, 'success');
+                } else if (data.status === 'already_trained') {
+                    showMsg('ML уже обучена', 'info');
+                } else {
+                    showMsg(data.message || 'Не удалось обучить', 'error');
+                }
+                loadAll();
+            } catch(e) {
+                showMsg('Ошибка обучения', 'error');
+            }
+        }
+
+        function loadAll() {
+            loadStatus();
+            loadVerdicts();
+        }
+
+        loadAll();
+        setInterval(loadAll, 10000);
+    </script>
+</body>
+</html>
