@@ -191,25 +191,27 @@ class MLAnomalyDetector:
             metrics: Словарь метрик {metric_name: value}
         """
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            INSERT INTO ml_training_data
-            (src_ip, timestamp, connections_count, unique_ports,
-             unique_dst_ips, total_bytes, avg_packet_size, is_normal)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-        ''', (
-            src_ip,
-            datetime.now().timestamp(),
-            metrics.get('connections_count', 0),
-            metrics.get('unique_ports', 0),
-            metrics.get('unique_dst_ips', 0),
-            metrics.get('total_bytes', 0),
-            metrics.get('avg_packet_size', 0)
-        ))
+            cursor.execute('''
+                INSERT INTO ml_training_data
+                (src_ip, timestamp, connections_count, unique_ports,
+                 unique_dst_ips, total_bytes, avg_packet_size, is_normal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            ''', (
+                src_ip,
+                datetime.now().timestamp(),
+                metrics.get('connections_count', 0),
+                metrics.get('unique_ports', 0),
+                metrics.get('unique_dst_ips', 0),
+                metrics.get('total_bytes', 0),
+                metrics.get('avg_packet_size', 0)
+            ))
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     def collect_from_aggregated(self) -> int:
         """
@@ -220,58 +222,60 @@ class MLAnomalyDetector:
             Количество добавленных записей
         """
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Получаем уникальные окна (src_ip + window_start)
-        cursor.execute('''
-            SELECT DISTINCT src_ip, window_start
-            FROM aggregated_metrics
-            ORDER BY window_start
-        ''')
-
-        windows = cursor.fetchall()
-        added = 0
-
-        for src_ip, window_start in windows:
-            # Проверяем, есть ли уже эти данные
+            # Получаем уникальные окна (src_ip + window_start)
             cursor.execute('''
-                SELECT COUNT(*) FROM ml_training_data
-                WHERE src_ip = ? AND abs(timestamp - ?) < 1
-            ''', (src_ip, window_start))
-
-            if cursor.fetchone()[0] > 0:
-                continue
-
-            # Собираем метрики для этого окна
-            cursor.execute('''
-                SELECT metric_name, metric_value
+                SELECT DISTINCT src_ip, window_start
                 FROM aggregated_metrics
-                WHERE src_ip = ? AND window_start = ?
-            ''', (src_ip, window_start))
+                ORDER BY window_start
+            ''')
 
-            metrics = {}
-            for name, value in cursor.fetchall():
-                metrics[name] = value
+            windows = cursor.fetchall()
+            added = 0
 
-            if len(metrics) >= 3:
+            for src_ip, window_start in windows:
+                # Проверяем, есть ли уже эти данные
                 cursor.execute('''
-                    INSERT INTO ml_training_data
-                    (src_ip, timestamp, connections_count, unique_ports,
-                     unique_dst_ips, total_bytes, avg_packet_size, is_normal)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-                ''', (
-                    src_ip,
-                    window_start,
-                    metrics.get('connections_count', 0),
-                    metrics.get('unique_ports', 0),
-                    metrics.get('unique_dst_ips', 0),
-                    metrics.get('total_bytes', 0),
-                    metrics.get('avg_packet_size', 0)
-                ))
-                added += 1
+                    SELECT COUNT(*) FROM ml_training_data
+                    WHERE src_ip = ? AND abs(timestamp - ?) < 1
+                ''', (src_ip, window_start))
 
-        conn.commit()
-        conn.close()
+                if cursor.fetchone()[0] > 0:
+                    continue
+
+                # Собираем метрики для этого окна
+                cursor.execute('''
+                    SELECT metric_name, metric_value
+                    FROM aggregated_metrics
+                    WHERE src_ip = ? AND window_start = ?
+                ''', (src_ip, window_start))
+
+                metrics = {}
+                for name, value in cursor.fetchall():
+                    metrics[name] = value
+
+                if len(metrics) >= 3:
+                    cursor.execute('''
+                        INSERT INTO ml_training_data
+                        (src_ip, timestamp, connections_count, unique_ports,
+                         unique_dst_ips, total_bytes, avg_packet_size, is_normal)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    ''', (
+                        src_ip,
+                        window_start,
+                        metrics.get('connections_count', 0),
+                        metrics.get('unique_ports', 0),
+                        metrics.get('unique_dst_ips', 0),
+                        metrics.get('total_bytes', 0),
+                        metrics.get('avg_packet_size', 0)
+                    ))
+                    added += 1
+
+            conn.commit()
+        finally:
+            conn.close()
 
         if added > 0:
             print(f"[MLDetector] Collected {added} training samples from aggregated_metrics",
@@ -282,10 +286,12 @@ class MLAnomalyDetector:
     def get_training_sample_count(self) -> int:
         """Количество обучающих наблюдений"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM ml_training_data WHERE is_normal = 1')
-        count = cursor.fetchone()[0]
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM ml_training_data WHERE is_normal = 1')
+            count = cursor.fetchone()[0]
+        finally:
+            conn.close()
         return count
 
     # =========================================================================
@@ -321,17 +327,19 @@ class MLAnomalyDetector:
 
         # Загружаем обучающие данные
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT connections_count, unique_ports, unique_dst_ips,
-                   total_bytes, avg_packet_size
-            FROM ml_training_data
-            WHERE is_normal = 1
-        ''')
+            cursor.execute('''
+                SELECT connections_count, unique_ports, unique_dst_ips,
+                       total_bytes, avg_packet_size
+                FROM ml_training_data
+                WHERE is_normal = 1
+            ''')
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         n_samples = len(rows)
 
@@ -378,19 +386,21 @@ class MLAnomalyDetector:
 
         # Сохраняем метрики в БД
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO ml_model_metrics (n_samples, n_features, contamination, alpha, notes)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (
-            n_samples,
-            len(self.FEATURE_NAMES),
-            self.ml_contamination,
-            self.alpha,
-            f"anomalies_in_train={n_anomalies_in_train}, mean_score={mean_score:.4f}"
-        ))
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO ml_model_metrics (n_samples, n_features, contamination, alpha, notes)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                n_samples,
+                len(self.FEATURE_NAMES),
+                self.ml_contamination,
+                self.alpha,
+                f"anomalies_in_train={n_anomalies_in_train}, mean_score={mean_score:.4f}"
+            ))
+            conn.commit()
+        finally:
+            conn.close()
 
         result = {
             'status': 'trained',
@@ -454,49 +464,50 @@ class MLAnomalyDetector:
         contributions = []
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        for metric_name in self.FEATURE_NAMES:
-            current_value = float(metrics.get(metric_name, 0))
+            for metric_name in self.FEATURE_NAMES:
+                current_value = float(metrics.get(metric_name, 0))
 
-            # Получаем исторические значения
-            cursor.execute('''
-                SELECT metric_value
-                FROM aggregated_metrics
-                WHERE src_ip = ? AND metric_name = ?
-                ORDER BY timestamp DESC
-                LIMIT 50
-            ''', (src_ip, metric_name))
+                # Получаем исторические значения
+                cursor.execute('''
+                    SELECT metric_value
+                    FROM aggregated_metrics
+                    WHERE src_ip = ? AND metric_name = ?
+                    ORDER BY timestamp DESC
+                    LIMIT 50
+                ''', (src_ip, metric_name))
 
-            values = [row[0] for row in cursor.fetchall()]
+                values = [row[0] for row in cursor.fetchall()]
 
-            if len(values) < 3:
-                z_scores.append(0.0)
+                if len(values) < 3:
+                    z_scores.append(0.0)
+                    contributions.append({
+                        'feature': metric_name,
+                        'z_score': 0.0,
+                        'current': current_value,
+                        'mean': 0.0,
+                        'std': 0.0
+                    })
+                    continue
+
+                mean = sum(values) / len(values)
+                variance = sum((x - mean) ** 2 for x in values) / len(values)
+                std = math.sqrt(variance)
+
+                z = abs((current_value - mean) / std) if std > 0 else 0.0
+                z_scores.append(z)
+
                 contributions.append({
                     'feature': metric_name,
-                    'z_score': 0.0,
-                    'current': current_value,
-                    'mean': 0.0,
-                    'std': 0.0
+                    'z_score': round(z, 2),
+                    'current': round(current_value, 2),
+                    'mean': round(mean, 2),
+                    'std': round(std, 2)
                 })
-                continue
-
-            mean = sum(values) / len(values)
-            variance = sum((x - mean) ** 2 for x in values) / len(values)
-            std = math.sqrt(variance)
-
-            z = abs((current_value - mean) / std) if std > 0 else 0.0
-            z_scores.append(z)
-
-            contributions.append({
-                'feature': metric_name,
-                'z_score': round(z, 2),
-                'current': round(current_value, 2),
-                'mean': round(mean, 2),
-                'std': round(std, 2)
-            })
-
-        conn.close()
+        finally:
+            conn.close()
 
         if not z_scores:
             return 0.0, contributions
@@ -589,27 +600,29 @@ class MLAnomalyDetector:
     def save_ml_alert(self, alert: MLAlert):
         """Сохранение ML-алерта в БД"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            INSERT INTO ml_alerts
-            (timestamp, src_ip, anomaly_type, ml_score, stat_score,
-             combined_score, severity, description, top_features, resolved)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-        ''', (
-            alert.timestamp,
-            alert.src_ip,
-            alert.anomaly_type,
-            alert.ml_score,
-            alert.stat_score,
-            alert.combined_score,
-            alert.severity,
-            alert.description,
-            json.dumps(alert.top_features, ensure_ascii=False)
-        ))
+            cursor.execute('''
+                INSERT INTO ml_alerts
+                (timestamp, src_ip, anomaly_type, ml_score, stat_score,
+                 combined_score, severity, description, top_features, resolved)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ''', (
+                alert.timestamp,
+                alert.src_ip,
+                alert.anomaly_type,
+                alert.ml_score,
+                alert.stat_score,
+                alert.combined_score,
+                alert.severity,
+                alert.description,
+                json.dumps(alert.top_features, ensure_ascii=False)
+            ))
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     # =========================================================================
     #  ПОЛНЫЙ ЦИКЛ ДЕТЕКЦИИ
@@ -627,50 +640,51 @@ class MLAnomalyDetector:
                       file=sys.stderr)
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Получаем последние окна для каждого хоста
-        cursor.execute('''
-            SELECT DISTINCT src_ip, window_start, window_end
-            FROM aggregated_metrics
-            WHERE (src_ip, timestamp) IN (
-                SELECT src_ip, MAX(timestamp)
-                FROM aggregated_metrics
-                GROUP BY src_ip
-            )
-        ''')
-
-        windows = cursor.fetchall()
-        total_alerts = 0
-
-        for src_ip, window_start, window_end in windows:
-            # Собираем метрики для этого окна
+            # Получаем последние окна для каждого хоста
             cursor.execute('''
-                SELECT metric_name, metric_value
+                SELECT DISTINCT src_ip, window_start, window_end
                 FROM aggregated_metrics
-                WHERE src_ip = ? AND window_start = ?
-            ''', (src_ip, window_start))
+                WHERE (src_ip, timestamp) IN (
+                    SELECT src_ip, MAX(timestamp)
+                    FROM aggregated_metrics
+                    GROUP BY src_ip
+                )
+            ''')
 
-            metrics = {}
-            for name, value in cursor.fetchall():
-                metrics[name] = value
+            windows = cursor.fetchall()
+            total_alerts = 0
 
-            if len(metrics) < 3:
-                continue
+            for src_ip, window_start, window_end in windows:
+                # Собираем метрики для этого окна
+                cursor.execute('''
+                    SELECT metric_name, metric_value
+                    FROM aggregated_metrics
+                    WHERE src_ip = ? AND window_start = ?
+                ''', (src_ip, window_start))
 
-            # Также добавляем в обучающие данные (для будущего переобучения)
-            self.collect_training_data(src_ip, metrics)
+                metrics = {}
+                for name, value in cursor.fetchall():
+                    metrics[name] = value
 
-            # Детектируем
-            alert = self.detect(src_ip, metrics)
+                if len(metrics) < 3:
+                    continue
 
-            if alert:
-                self.save_ml_alert(alert)
-                total_alerts += 1
-                print(f"[ML-ALERT] {alert.severity.upper()}: {alert.description}",
-                      file=sys.stderr)
+                # Также добавляем в обучающие данные (для будущего переобучения)
+                self.collect_training_data(src_ip, metrics)
 
-        conn.close()
+                # Детектируем
+                alert = self.detect(src_ip, metrics)
+
+                if alert:
+                    self.save_ml_alert(alert)
+                    total_alerts += 1
+                    print(f"[ML-ALERT] {alert.severity.upper()}: {alert.description}",
+                          file=sys.stderr)
+        finally:
+            conn.close()
 
         if total_alerts > 0:
             print(f"[MLDetector] Detection cycle complete: {total_alerts} alerts",
@@ -698,32 +712,34 @@ class MLAnomalyDetector:
                              src_ip: str = None) -> List[Dict]:
         """Получение последних ML-алертов"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        query = '''
-            SELECT timestamp, src_ip, anomaly_type, ml_score, stat_score,
-                   combined_score, severity, description, top_features
-            FROM ml_alerts
-        '''
-        conditions = []
-        params = []
+            query = '''
+                SELECT timestamp, src_ip, anomaly_type, ml_score, stat_score,
+                       combined_score, severity, description, top_features
+                FROM ml_alerts
+            '''
+            conditions = []
+            params = []
 
-        if severity:
-            conditions.append('severity = ?')
-            params.append(severity)
-        if src_ip:
-            conditions.append('src_ip = ?')
-            params.append(src_ip)
+            if severity:
+                conditions.append('severity = ?')
+                params.append(severity)
+            if src_ip:
+                conditions.append('src_ip = ?')
+                params.append(src_ip)
 
-        if conditions:
-            query += ' WHERE ' + ' AND '.join(conditions)
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
 
-        query += ' ORDER BY timestamp DESC LIMIT ?'
-        params.append(limit)
+            query += ' ORDER BY timestamp DESC LIMIT ?'
+            params.append(limit)
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         alerts = []
         for row in rows:
@@ -751,17 +767,19 @@ class MLAnomalyDetector:
     def get_training_history(self) -> List[Dict]:
         """История обучений модели"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT trained_at, n_samples, n_features, contamination, alpha, notes
-            FROM ml_model_metrics
-            ORDER BY trained_at DESC
-            LIMIT 20
-        ''')
+            cursor.execute('''
+                SELECT trained_at, n_samples, n_features, contamination, alpha, notes
+                FROM ml_model_metrics
+                ORDER BY trained_at DESC
+                LIMIT 20
+            ''')
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         return [{
             'trained_at': row[0],
@@ -775,28 +793,29 @@ class MLAnomalyDetector:
     def get_ml_alerts_stats(self) -> Dict:
         """Статистика ML-алертов"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('SELECT COUNT(*) FROM ml_alerts')
-        total = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM ml_alerts')
+            total = cursor.fetchone()[0]
 
-        one_hour_ago = datetime.now().timestamp() - 3600
-        cursor.execute('SELECT COUNT(*) FROM ml_alerts WHERE timestamp > ?', (one_hour_ago,))
-        last_hour = cursor.fetchone()[0]
+            one_hour_ago = datetime.now().timestamp() - 3600
+            cursor.execute('SELECT COUNT(*) FROM ml_alerts WHERE timestamp > ?', (one_hour_ago,))
+            last_hour = cursor.fetchone()[0]
 
-        cursor.execute('''
-            SELECT severity, COUNT(*) FROM ml_alerts GROUP BY severity
-        ''')
-        by_severity = {r[0]: r[1] for r in cursor.fetchall()}
+            cursor.execute('''
+                SELECT severity, COUNT(*) FROM ml_alerts GROUP BY severity
+            ''')
+            by_severity = {r[0]: r[1] for r in cursor.fetchall()}
 
-        cursor.execute('''
-            SELECT AVG(combined_score) FROM ml_alerts
-            WHERE timestamp > ?
-        ''', (one_hour_ago,))
-        avg_score_row = cursor.fetchone()
-        avg_combined = round(avg_score_row[0], 4) if avg_score_row[0] else 0.0
-
-        conn.close()
+            cursor.execute('''
+                SELECT AVG(combined_score) FROM ml_alerts
+                WHERE timestamp > ?
+            ''', (one_hour_ago,))
+            avg_score_row = cursor.fetchone()
+            avg_combined = round(avg_score_row[0], 4) if avg_score_row[0] else 0.0
+        finally:
+            conn.close()
 
         return {
             'total': total,

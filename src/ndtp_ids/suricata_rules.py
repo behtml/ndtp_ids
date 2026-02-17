@@ -206,20 +206,26 @@ class SuricataRuleParser:
         return matches
         
     def _match_ip(self, rule_ip: str, packet_ip: str) -> bool:
-        """Проверка соответствия IP адреса правилу"""
+        """Проверka соответствия IP адреса правилу"""
         if rule_ip == 'any':
             return True
             
-        # Простое сравнение (можно расширить для CIDR и переменных)
+        # Простое сравнение
         if rule_ip == packet_ip:
             return True
             
-        # Проверка на CIDR (упрощенная)
+        # Проверка на CIDR с использованием ipaddress
         if '/' in rule_ip:
-            # Для полноценной поддержки нужен ipaddress модуль
-            network_prefix = rule_ip.split('/')[0].rsplit('.', 1)[0]
-            if packet_ip.startswith(network_prefix):
-                return True
+            try:
+                import ipaddress
+                network = ipaddress.ip_network(rule_ip, strict=False)
+                if ipaddress.ip_address(packet_ip) in network:
+                    return True
+            except (ValueError, TypeError):
+                # Фолбэк: упрощённая проверка по префиксу
+                network_prefix = rule_ip.split('/')[0].rsplit('.', 1)[0]
+                if packet_ip.startswith(network_prefix):
+                    return True
                 
         return False
         
@@ -236,13 +242,41 @@ class SuricataRuleParser:
             return True
             
         # Проверка диапазона портов (например, 1024:65535)
-        if ':' in rule_port:
+        if ':' in rule_port and not rule_port.startswith('['):
             try:
                 start, end = map(int, rule_port.split(':'))
                 if start <= packet_port <= end:
                     return True
             except ValueError:
                 pass
+        
+        # Проверка Suricata bracket-синтаксиса: [1-1024], [5900:5999]
+        if rule_port.startswith('[') and rule_port.endswith(']'):
+            inner = rule_port[1:-1]  # убираем скобки
+            # Диапазон через дефис: [1-1024]
+            if '-' in inner:
+                try:
+                    start, end = map(int, inner.split('-', 1))
+                    if start <= packet_port <= end:
+                        return True
+                except ValueError:
+                    pass
+            # Диапазон через двоеточие: [5900:5999]
+            if ':' in inner:
+                try:
+                    start, end = map(int, inner.split(':', 1))
+                    if start <= packet_port <= end:
+                        return True
+                except ValueError:
+                    pass
+            # Список портов: [80,443,8080]
+            if ',' in inner:
+                try:
+                    ports = [int(p.strip()) for p in inner.split(',')]
+                    if packet_port in ports:
+                        return True
+                except ValueError:
+                    pass
                 
         return False
         

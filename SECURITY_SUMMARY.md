@@ -99,7 +99,7 @@ cursor.execute('''
 - Нет сетевого доступа к БД
 - Данные остаются на локальной машине
 
-**Файл:** `ndtp_ids.db` (не коммитится в git)
+**Файл:** `ids.db` (не коммитится в git)
 
 ### 5. Минимальные привилегии
 
@@ -138,11 +138,11 @@ cursor.execute('''
 
 ```bash
 # Linux/macOS
-chmod 600 ndtp_ids.db
-chown username:username ndtp_ids.db
+chmod 600 ids.db
+chown username:username ids.db
 
 # Windows
-icacls ndtp_ids.db /inheritance:r /grant:r "%USERNAME%":F
+icacls ids.db /inheritance:r /grant:r "%USERNAME%":F
 ```
 
 ### 2. Использование capabilities (Linux)
@@ -169,14 +169,14 @@ CMD ["python", "-m", "ndtp_ids.aggregator"]
 
 ```bash
 # Регулярно проверяйте алерты
-sqlite3 ndtp_ids.db "SELECT * FROM alerts WHERE severity='critical';"
+sqlite3 ids.db "SELECT * FROM alerts WHERE severity='critical';"
 ```
 
 ### 5. Ротация базы данных
 
 ```bash
 # Периодически архивируйте старые данные
-sqlite3 ndtp_ids.db "DELETE FROM raw_events WHERE timestamp < strftime('%s', 'now', '-30 days');"
+sqlite3 ids.db "DELETE FROM raw_events WHERE timestamp < strftime('%s', 'now', '-30 days');"
 ```
 
 ## 🔐 Соответствие стандартам

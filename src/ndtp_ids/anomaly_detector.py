@@ -163,17 +163,19 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Используем новую схему с metric_name и metric_value
-        cursor.execute('''
-            SELECT metric_value
-            FROM aggregated_metrics
-            WHERE src_ip = ? AND metric_name = ?
-            ORDER BY timestamp DESC
-            LIMIT 50
-        ''', (src_ip, metric))
-        
-        values = [row[0] for row in cursor.fetchall()]
-        conn.close()
+        try:
+            # Используем новую схему с metric_name и metric_value
+            cursor.execute('''
+                SELECT metric_value
+                FROM aggregated_metrics
+                WHERE src_ip = ? AND metric_name = ?
+                ORDER BY timestamp DESC
+                LIMIT 50
+            ''', (src_ip, metric))
+            
+            values = [row[0] for row in cursor.fetchall()]
+        finally:
+            conn.close()
         
         if len(values) < 2:
             return 0.0, 0.0, len(values)
@@ -304,26 +306,28 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('''
-            INSERT INTO alerts
-            (timestamp, src_ip, anomaly_type, score, severity, description,
-             metric_value, baseline_mean, baseline_std, resolved)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            alert.timestamp,
-            alert.src_ip,
-            alert.anomaly_type,
-            alert.score,
-            alert.severity,
-            alert.description,
-            alert.current_value,
-            alert.mean_value,
-            alert.std_value,
-            0  # resolved = False по умолчанию
-        ))
-        
-        conn.commit()
-        conn.close()
+        try:
+            cursor.execute('''
+                INSERT INTO alerts
+                (timestamp, src_ip, anomaly_type, score, severity, description,
+                 metric_value, baseline_mean, baseline_std, resolved)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                alert.timestamp,
+                alert.src_ip,
+                alert.anomaly_type,
+                alert.score,
+                alert.severity,
+                alert.description,
+                alert.current_value,
+                alert.mean_value,
+                alert.std_value,
+                0  # resolved = False по умолчанию
+            ))
+            
+            conn.commit()
+        finally:
+            conn.close()
     
     def update_host_profile(self, src_ip: str):
         """
@@ -342,9 +346,10 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Обновляем профиль для каждой метрики в нормализованном формате
-        for metric_name in metrics:
-            mean, std, count = self.calculate_statistics(src_ip, metric_name)
+        try:
+            # Обновляем профиль для каждой метрики в нормализованном формате
+            for metric_name in metrics:
+                mean, std, count = self.calculate_statistics(src_ip, metric_name)
             
             # Получаем min и max значения для этой метрики
             cursor.execute('''
@@ -373,8 +378,9 @@ class AnomalyDetector:
                 datetime.now().timestamp()
             ))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
     
     def get_recent_alerts(self, limit: int = 50, severity: str = None) -> List[Dict]:
         """
@@ -390,24 +396,26 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        if severity:
-            cursor.execute('''
-                SELECT timestamp, src_ip, anomaly_type, score, severity, description
-                FROM alerts
-                WHERE severity = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-            ''', (severity, limit))
-        else:
-            cursor.execute('''
-                SELECT timestamp, src_ip, anomaly_type, score, severity, description
-                FROM alerts
-                ORDER BY timestamp DESC
-                LIMIT ?
-            ''', (limit,))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        try:
+            if severity:
+                cursor.execute('''
+                    SELECT timestamp, src_ip, anomaly_type, score, severity, description
+                    FROM alerts
+                    WHERE severity = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                ''', (severity, limit))
+            else:
+                cursor.execute('''
+                    SELECT timestamp, src_ip, anomaly_type, score, severity, description
+                    FROM alerts
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                ''', (limit,))
+            
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
         
         alerts = []
         for row in rows:
@@ -430,43 +438,40 @@ class AnomalyDetector:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Получаем последние окна для каждого хоста
-        cursor.execute('''
-            SELECT DISTINCT src_ip, window_start, window_end
-            FROM aggregated_metrics
-            WHERE (src_ip, timestamp) IN (
-                SELECT src_ip, MAX(timestamp)
+        try:
+            # Получаем последние окна для каждого хоста
+            cursor.execute('''
+                SELECT src_ip, window_start, window_end
                 FROM aggregated_metrics
                 GROUP BY src_ip
-            )
-        ''')
-        
-        windows = cursor.fetchall()
-        
-        for src_ip, window_start, window_end in windows:
-            # Получаем все метрики для этого окна
-            cursor.execute('''
+            ''')
+            
+            windows = cursor.fetchall()
+            
+            for src_ip, window_start, window_end in windows:
+                # Получаем все метрики для этого окна
+                cursor.execute('''
                 SELECT metric_name, metric_value
                 FROM aggregated_metrics
                 WHERE src_ip = ? AND window_start = ?
             ''', (src_ip, window_start))
-            
-            window_data = {
-                'src_ip': src_ip,
-                'window_start': window_start,
-                'window_end': window_end
-            }
-            
-            metrics_dict = {}
-            # Заполняем данные метрик
-            for metric_name, metric_value in cursor.fetchall():
-                window_data[metric_name] = metric_value
-                metrics_dict[metric_name] = metric_value
-            
-            # Проверяем что у нас есть необходимые метрики
-            required_metrics = ['connections_count', 'unique_ports', 'unique_dst_ips', 'total_bytes']
-            if not all(m in window_data for m in required_metrics):
-                continue
+                
+                window_data = {
+                    'src_ip': src_ip,
+                    'window_start': window_start,
+                    'window_end': window_end
+                }
+                
+                metrics_dict = {}
+                # Заполняем данные метрик
+                for metric_name, metric_value in cursor.fetchall():
+                    window_data[metric_name] = metric_value
+                    metrics_dict[metric_name] = metric_value
+                
+                # Проверяем что у нас есть необходимые метрики
+                required_metrics = ['connections_count', 'unique_ports', 'unique_dst_ips', 'total_bytes']
+                if not all(m in window_data for m in required_metrics):
+                    continue
             
             # --- Слой 1: Z-Score (статистический анализ) ---
             alerts = self.analyze_window(window_data)
@@ -492,8 +497,8 @@ class AnomalyDetector:
             
             # Обновляем профиль хоста
             self.update_host_profile(src_ip)
-        
-        conn.close()
+        finally:
+            conn.close()
         
         # Попытка автообучения ML если ещё не обучен
         if self.ml_detector is not None and not self.ml_detector.is_trained:

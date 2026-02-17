@@ -163,30 +163,31 @@ class HybridScorer:
             return 0.0, []
 
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cutoff = datetime.now().timestamp() - time_window_seconds
+            cutoff = datetime.now().timestamp() - time_window_seconds
 
-        # Проверяем наличие таблицы
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='suricata_alerts'
-        """)
-        if not cursor.fetchone():
+            # Проверяем наличие таблицы
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='suricata_alerts'
+            """)
+            if not cursor.fetchone():
+                return 0.0, []
+
+            cursor.execute('''
+                SELECT timestamp, sid, msg, severity, src_ip, dst_ip,
+                       dst_port, protocol
+                FROM suricata_alerts
+                WHERE src_ip = ? AND timestamp > ?
+                ORDER BY timestamp DESC
+                LIMIT 20
+            ''', (src_ip, cutoff))
+
+            rows = cursor.fetchall()
+        finally:
             conn.close()
-            return 0.0, []
-
-        cursor.execute('''
-            SELECT timestamp, sid, msg, severity, src_ip, dst_ip,
-                   dst_port, protocol
-            FROM suricata_alerts
-            WHERE src_ip = ? AND timestamp > ?
-            ORDER BY timestamp DESC
-            LIMIT 20
-        ''', (src_ip, cutoff))
-
-        rows = cursor.fetchall()
-        conn.close()
 
         if not rows:
             return 0.0, []
@@ -417,34 +418,36 @@ class HybridScorer:
     def save_verdict(self, verdict: HybridVerdict):
         """Сохранение вердикта в БД"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        details = {
-            'suricata_alerts': verdict.suricata_alerts,
-            'stat_anomalies': verdict.stat_anomalies,
-            'ml_top_features': verdict.ml_top_features
-        }
+            details = {
+                'suricata_alerts': verdict.suricata_alerts,
+                'stat_anomalies': verdict.stat_anomalies,
+                'ml_top_features': verdict.ml_top_features
+            }
 
-        cursor.execute('''
-            INSERT INTO hybrid_verdicts
-            (timestamp, src_ip, suricata_score, stat_score, ml_score,
-             combined_score, severity, confidence, description, details_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            verdict.timestamp,
-            verdict.src_ip,
-            verdict.suricata_score,
-            verdict.stat_score,
-            verdict.ml_score,
-            verdict.combined_score,
-            verdict.severity,
-            verdict.confidence,
-            verdict.description,
-            json.dumps(details, ensure_ascii=False)
-        ))
+            cursor.execute('''
+                INSERT INTO hybrid_verdicts
+                (timestamp, src_ip, suricata_score, stat_score, ml_score,
+                 combined_score, severity, confidence, description, details_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                verdict.timestamp,
+                verdict.src_ip,
+                verdict.suricata_score,
+                verdict.stat_score,
+                verdict.ml_score,
+                verdict.combined_score,
+                verdict.severity,
+                verdict.confidence,
+                verdict.description,
+                json.dumps(details, ensure_ascii=False)
+            ))
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     # =========================================================================
     #  ПОЛНЫЙ ЦИКЛ
@@ -456,54 +459,55 @@ class HybridScorer:
         гибридный скор, сохранить.
         """
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT DISTINCT src_ip
-            FROM aggregated_metrics
-            WHERE timestamp > ?
-        ''', (datetime.now().timestamp() - 300,))
-
-        active_hosts = [row[0] for row in cursor.fetchall()]
-
-        verdicts_generated = 0
-        alerts_generated = 0
-
-        for src_ip in active_hosts:
             cursor.execute('''
-                SELECT metric_name, metric_value
+                SELECT DISTINCT src_ip
                 FROM aggregated_metrics
-                WHERE src_ip = ?
-                AND timestamp = (
-                    SELECT MAX(timestamp) FROM aggregated_metrics WHERE src_ip = ?
-                )
-            ''', (src_ip, src_ip))
+                WHERE timestamp > ?
+            ''', (datetime.now().timestamp() - 300,))
 
-            metrics = {}
-            for name, value in cursor.fetchall():
-                metrics[name] = value
+            active_hosts = [row[0] for row in cursor.fetchall()]
 
-            if len(metrics) < 3:
-                continue
+            verdicts_generated = 0
+            alerts_generated = 0
 
-            verdict = self.score_host(src_ip, metrics)
-            verdicts_generated += 1
+            for src_ip in active_hosts:
+                cursor.execute('''
+                    SELECT metric_name, metric_value
+                    FROM aggregated_metrics
+                    WHERE src_ip = ?
+                    AND timestamp = (
+                        SELECT MAX(timestamp) FROM aggregated_metrics WHERE src_ip = ?
+                    )
+                ''', (src_ip, src_ip))
 
-            if verdict.combined_score >= self.SEVERITY_THRESHOLDS['low']:
-                self.save_verdict(verdict)
-                alerts_generated += 1
+                metrics = {}
+                for name, value in cursor.fetchall():
+                    metrics[name] = value
 
-                print(
-                    f"[HYBRID] {verdict.severity.upper()} "
-                    f"({verdict.confidence}) {verdict.description}",
-                    file=sys.stderr
-                )
+                if len(metrics) < 3:
+                    continue
 
-            # Пополняем обучающие данные для ML
-            if self.ml_detector is not None:
-                self.ml_detector.collect_training_data(src_ip, metrics)
+                verdict = self.score_host(src_ip, metrics)
+                verdicts_generated += 1
 
-        conn.close()
+                if verdict.combined_score >= self.SEVERITY_THRESHOLDS['low']:
+                    self.save_verdict(verdict)
+                    alerts_generated += 1
+
+                    print(
+                        f"[HYBRID] {verdict.severity.upper()} "
+                        f"({verdict.confidence}) {verdict.description}",
+                        file=sys.stderr
+                    )
+
+                # Пополняем обучающие данные для ML
+                if self.ml_detector is not None:
+                    self.ml_detector.collect_training_data(src_ip, metrics)
+        finally:
+            conn.close()
 
         if verdicts_generated > 0:
             print(
@@ -538,32 +542,34 @@ class HybridScorer:
                             src_ip: str = None) -> List[Dict]:
         """Последние гибридные вердикты для дашборда"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        query = '''
-            SELECT timestamp, src_ip, suricata_score, stat_score, ml_score,
-                   combined_score, severity, confidence, description, details_json
-            FROM hybrid_verdicts
-        '''
-        conditions = []
-        params = []
+            query = '''
+                SELECT timestamp, src_ip, suricata_score, stat_score, ml_score,
+                       combined_score, severity, confidence, description, details_json
+                FROM hybrid_verdicts
+            '''
+            conditions = []
+            params = []
 
-        if severity:
-            conditions.append('severity = ?')
-            params.append(severity)
-        if src_ip:
-            conditions.append('src_ip = ?')
-            params.append(src_ip)
+            if severity:
+                conditions.append('severity = ?')
+                params.append(severity)
+            if src_ip:
+                conditions.append('src_ip = ?')
+                params.append(src_ip)
 
-        if conditions:
-            query += ' WHERE ' + ' AND '.join(conditions)
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
 
-        query += ' ORDER BY timestamp DESC LIMIT ?'
-        params.append(limit)
+            query += ' ORDER BY timestamp DESC LIMIT ?'
+            params.append(limit)
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         verdicts = []
         for row in rows:
@@ -632,36 +638,37 @@ class HybridScorer:
     def get_hybrid_stats(self) -> Dict:
         """Агрегированная статистика гибридного скоринга"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('SELECT COUNT(*) FROM hybrid_verdicts')
-        total = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM hybrid_verdicts')
+            total = cursor.fetchone()[0]
 
-        one_hour_ago = datetime.now().timestamp() - 3600
-        cursor.execute(
-            'SELECT COUNT(*) FROM hybrid_verdicts WHERE timestamp > ?',
-            (one_hour_ago,)
-        )
-        last_hour = cursor.fetchone()[0]
+            one_hour_ago = datetime.now().timestamp() - 3600
+            cursor.execute(
+                'SELECT COUNT(*) FROM hybrid_verdicts WHERE timestamp > ?',
+                (one_hour_ago,)
+            )
+            last_hour = cursor.fetchone()[0]
 
-        cursor.execute('''
-            SELECT severity, COUNT(*) FROM hybrid_verdicts GROUP BY severity
-        ''')
-        by_severity = {r[0]: r[1] for r in cursor.fetchall()}
+            cursor.execute('''
+                SELECT severity, COUNT(*) FROM hybrid_verdicts GROUP BY severity
+            ''')
+            by_severity = {r[0]: r[1] for r in cursor.fetchall()}
 
-        cursor.execute('''
-            SELECT confidence, COUNT(*) FROM hybrid_verdicts GROUP BY confidence
-        ''')
-        by_confidence = {r[0]: r[1] for r in cursor.fetchall()}
+            cursor.execute('''
+                SELECT confidence, COUNT(*) FROM hybrid_verdicts GROUP BY confidence
+            ''')
+            by_confidence = {r[0]: r[1] for r in cursor.fetchall()}
 
-        cursor.execute('''
-            SELECT AVG(combined_score), AVG(suricata_score),
-                   AVG(stat_score), AVG(ml_score)
-            FROM hybrid_verdicts WHERE timestamp > ?
-        ''', (one_hour_ago,))
-        avg_row = cursor.fetchone()
-
-        conn.close()
+            cursor.execute('''
+                SELECT AVG(combined_score), AVG(suricata_score),
+                       AVG(stat_score), AVG(ml_score)
+                FROM hybrid_verdicts WHERE timestamp > ?
+            ''', (one_hour_ago,))
+            avg_row = cursor.fetchone()
+        finally:
+            conn.close()
 
         return {
             'total_verdicts': total,

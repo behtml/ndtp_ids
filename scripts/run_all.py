@@ -46,7 +46,8 @@ def cleanup(signum=None, frame=None):
 
 
 signal.signal(signal.SIGINT, cleanup)
-signal.signal(signal.SIGTERM, cleanup)
+if hasattr(signal, 'SIGTERM'):
+    signal.signal(signal.SIGTERM, cleanup)
 
 
 def start_component(name: str, cmd: list, cwd: str = None) -> subprocess.Popen:

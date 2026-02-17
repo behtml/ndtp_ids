@@ -116,7 +116,7 @@ python -m ndtp_ids.init_db --db /path/to/database.db
 
 **Output Example**:
 ```
-[init_db] Initializing database: ndtp_ids.db
+[init_db] Initializing database: ids.db
 [init_db] Creating aggregated_metrics table...
 [init_db] Creating indexes for aggregated_metrics...
 [init_db] Creating raw_events table...
@@ -223,21 +223,21 @@ No functional issues found. Only style comments about using Russian in docstring
 
 ```bash
 # First run - database will be created automatically
-python -m ndtp_ids.aggregator --db ndtp_ids.db --window 10
+python -m ndtp_ids.aggregator --db ids.db --window 10
 
 # Or explicitly initialize first
-python -m ndtp_ids.init_db --db ndtp_ids.db
-python -m ndtp_ids.aggregator --db ndtp_ids.db --window 10
+python -m ndtp_ids.init_db --db ids.db
+python -m ndtp_ids.aggregator --db ids.db --window 10
 ```
 
 ### Verifying Database Structure
 
 ```bash
 # Check database structure and contents
-python -m ndtp_ids.init_db --db ndtp_ids.db
+python -m ndtp_ids.init_db --db ids.db
 
 # Or use SQLite directly
-sqlite3 ndtp_ids.db "SELECT name FROM sqlite_master WHERE type='table'"
+sqlite3 ids.db "SELECT name FROM sqlite_master WHERE type='table'"
 ```
 
 ### In Python Code
@@ -247,8 +247,8 @@ from ndtp_ids.aggregator import MetricsAggregator
 from ndtp_ids.anomaly_detector import AnomalyDetector
 
 # Database will be created automatically
-aggregator = MetricsAggregator(db_path="ndtp_ids.db")
-detector = AnomalyDetector(db_path="ndtp_ids.db")
+aggregator = MetricsAggregator(db_path="ids.db")
+detector = AnomalyDetector(db_path="ids.db")
 
 # Process events
 event = {
