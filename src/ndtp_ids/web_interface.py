@@ -64,6 +64,47 @@ ml_detector = None
 hybrid_scorer = None
 
 
+def _ensure_core_tables():
+    """Создание базовых таблиц если они ещё не существуют"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS raw_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                src_ip TEXT NOT NULL,
+                dst_ip TEXT NOT NULL,
+                src_port INTEGER,
+                dst_port INTEGER,
+                protocol TEXT,
+                packet_size INTEGER,
+                direction TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS aggregated_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                src_ip TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                window_start REAL,
+                window_end REAL,
+                metric_name TEXT NOT NULL,
+                metric_value REAL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logger.info("Core tables ensured")
+    except Exception as e:
+        logger.warning(f"Error ensuring core tables: {e}")
+
+
 def init_components():
     """Инициализация компонентов системы"""
     global trainer, rule_parser, suricata_engine, anomaly_detector, ml_detector, hybrid_scorer
@@ -73,6 +114,9 @@ def init_components():
     
     # Загружаем базовые правила Suricata (в старый парсер для совместимости)
     rule_parser.load_rules_from_text(DEFAULT_RULES)
+    
+    # Создаём недостающие таблицы (raw_events, aggregated_metrics) если их нет
+    _ensure_core_tables()
     
     # Инициализируем Suricata Engine с БД-хранилищем правил
     suricata_engine = SuricataEngine(db_path=DB_PATH)
@@ -126,19 +170,35 @@ def chart_alerts_timeline():
         now = datetime.now().timestamp()
         day_ago = now - 86400
 
-        # Считаем алерты по часам за последние 24 часа
-        cursor.execute('''
+        # Собираем алерты из всех таблиц через UNION ALL
+        # (таблицы могут не существовать, обрабатываем gracefully)
+        union_parts = []
+        for table in ['alerts', 'suricata_alerts', 'ml_alerts']:
+            try:
+                cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+                if cursor.fetchone():
+                    union_parts.append(f"SELECT timestamp, severity FROM {table} WHERE timestamp > ?")
+            except Exception:
+                pass
+
+        if not union_parts:
+            conn.close()
+            return jsonify({'labels': [], 'datasets': {}})
+
+        union_query = " UNION ALL ".join(union_parts)
+        params = [day_ago] * len(union_parts)
+
+        cursor.execute(f'''
             SELECT CAST((timestamp - ?) / 3600 AS INTEGER) AS hour_bucket,
                    COUNT(*) AS cnt,
                    SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical,
                    SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
                    SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS medium,
                    SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS low
-            FROM alerts
-            WHERE timestamp > ?
+            FROM ({union_query})
             GROUP BY hour_bucket
             ORDER BY hour_bucket
-        ''', (day_ago, day_ago))
+        ''', [day_ago] + params)
 
         rows = cursor.fetchall()
         conn.close()
@@ -181,17 +241,23 @@ def chart_severity_distribution():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT severity, COUNT(*) FROM alerts GROUP BY severity
-        ''')
-        rows = cursor.fetchall()
+
+        # Собираем severity из всех таблиц алертов
+        severity_counts = {}
+        for table in ['alerts', 'suricata_alerts', 'ml_alerts']:
+            try:
+                cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+                if cursor.fetchone():
+                    cursor.execute(f'SELECT severity, COUNT(*) FROM {table} GROUP BY severity')
+                    for sev, cnt in cursor.fetchall():
+                        severity_counts[sev] = severity_counts.get(sev, 0) + cnt
+            except Exception:
+                pass
+
         conn.close()
 
-        labels = []
-        values = []
-        for row in rows:
-            labels.append(row[0])
-            values.append(row[1])
+        labels = list(severity_counts.keys())
+        values = list(severity_counts.values())
 
         return jsonify({'labels': labels, 'values': values})
     except Exception as e:
@@ -310,41 +376,73 @@ def get_stats():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Общее количество событий
-        cursor.execute("SELECT COUNT(*) FROM raw_events")
-        total_events = cursor.fetchone()[0]
+        # Общее количество событий (raw_events может не существовать)
+        total_events = 0
+        try:
+            cursor.execute("SELECT COUNT(*) FROM raw_events")
+            total_events = cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
         
-        # Количество алертов
-        cursor.execute("SELECT COUNT(*) FROM alerts")
-        total_alerts = cursor.fetchone()[0]
-        
-        # Алерты за последний час
+        # Количество алертов (из обеих таблиц: alerts + suricata_alerts)
+        total_alerts = 0
+        recent_alerts = 0
         one_hour_ago = datetime.now().timestamp() - 3600
-        cursor.execute(
-            "SELECT COUNT(*) FROM alerts WHERE timestamp > ?",
-            (one_hour_ago,)
-        )
-        recent_alerts = cursor.fetchone()[0]
+        
+        try:
+            cursor.execute("SELECT COUNT(*) FROM alerts")
+            total_alerts += cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(*) FROM alerts WHERE timestamp > ?",
+                (one_hour_ago,)
+            )
+            recent_alerts += cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("SELECT COUNT(*) FROM suricata_alerts")
+            total_alerts += cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(*) FROM suricata_alerts WHERE timestamp > ?",
+                (one_hour_ago,)
+            )
+            recent_alerts += cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
         
         # Количество отслеживаемых хостов
-        cursor.execute("SELECT COUNT(DISTINCT src_ip) FROM aggregated_metrics")
-        total_hosts = cursor.fetchone()[0]
+        total_hosts = 0
+        try:
+            cursor.execute("SELECT COUNT(DISTINCT src_ip) FROM aggregated_metrics")
+            total_hosts = cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
         
         conn.close()
         
         # Статистика обучения
-        learning_stats = trainer.get_learning_statistics()
+        learning_stats = {'learning_hosts': 0, 'detection_hosts': 0}
+        try:
+            learning_stats = trainer.get_learning_statistics()
+        except Exception:
+            pass
         
-        # Количество правил Suricata
-        suricata_rules_count = rule_parser.get_rules_count()
+        # Количество правил Suricata (из движка с БД, а не старого парсера)
+        suricata_rules_count = 0
+        try:
+            rules_info = suricata_engine.get_rules_count()
+            suricata_rules_count = rules_info.get('active', rules_info.get('total', 0))
+        except Exception:
+            suricata_rules_count = rule_parser.get_rules_count()
         
         return jsonify({
             'total_events': total_events,
             'total_alerts': total_alerts,
             'recent_alerts': recent_alerts,
             'total_hosts': total_hosts,
-            'learning_hosts': learning_stats['learning_hosts'],
-            'detection_hosts': learning_stats['detection_hosts'],
+            'learning_hosts': learning_stats.get('learning_hosts', 0),
+            'detection_hosts': learning_stats.get('detection_hosts', 0),
             'suricata_rules': suricata_rules_count,
             'timestamp': datetime.now().isoformat()
         })
@@ -355,14 +453,68 @@ def get_stats():
 
 @app.route('/api/alerts')
 def get_alerts():
-    """API: Получение списка алертов"""
+    """API: Получение объединённого списка алертов (suricata + z-score + ML)"""
     try:
         limit = request.args.get('limit', 50, type=int)
         severity = request.args.get('severity', None, type=str)
         
-        alerts = suricata_engine.get_recent_alerts(limit=limit, severity=severity)
+        all_alerts = []
         
-        return jsonify({'alerts': alerts})
+        # Алерты от Suricata
+        try:
+            suricata_alerts = suricata_engine.get_recent_alerts(limit=limit, severity=severity)
+            for a in suricata_alerts:
+                all_alerts.append({
+                    'timestamp': a['timestamp'],
+                    'src_ip': a.get('src_ip', 'N/A'),
+                    'description': a.get('msg', a.get('description', 'Suricata alert')),
+                    'score': 0,
+                    'severity': a.get('severity', 'medium'),
+                    'anomaly_type': 'suricata',
+                    'source': 'suricata'
+                })
+        except Exception as e:
+            logger.debug(f"Suricata alerts error: {e}")
+        
+        # Алерты от z-score детектора
+        try:
+            if anomaly_detector:
+                stat_alerts = anomaly_detector.get_recent_alerts(limit=limit, severity=severity)
+                for a in stat_alerts:
+                    all_alerts.append({
+                        'timestamp': a['timestamp'],
+                        'src_ip': a.get('src_ip', 'N/A'),
+                        'description': a.get('description', 'Anomaly alert'),
+                        'score': a.get('score', 0),
+                        'severity': a.get('severity', 'medium'),
+                        'anomaly_type': a.get('anomaly_type', 'stat'),
+                        'source': 'z-score'
+                    })
+        except Exception as e:
+            logger.debug(f"Anomaly alerts error: {e}")
+        
+        # Алерты от ML-детектора
+        try:
+            if ml_detector:
+                ml_alerts = ml_detector.get_recent_ml_alerts(limit=limit, severity=severity)
+                for a in ml_alerts:
+                    all_alerts.append({
+                        'timestamp': a['timestamp'],
+                        'src_ip': a.get('src_ip', 'N/A'),
+                        'description': a.get('description', 'ML anomaly'),
+                        'score': a.get('combined_score', a.get('ml_score', 0)),
+                        'severity': a.get('severity', 'medium'),
+                        'anomaly_type': a.get('anomaly_type', 'ml'),
+                        'source': 'ml'
+                    })
+        except Exception as e:
+            logger.debug(f"ML alerts error: {e}")
+        
+        # Сортируем по timestamp (новые первые) и обрезаем
+        all_alerts.sort(key=lambda x: x['timestamp'], reverse=True)
+        all_alerts = all_alerts[:limit]
+        
+        return jsonify({'alerts': all_alerts})
     except Exception as e:
         logger.error(f"Ошибка при получении алертов: {e}")
         return jsonify({'error': str(e)}), 500
@@ -402,31 +554,45 @@ def get_host_details(ip):
         if not profile:
             return jsonify({'error': 'Host not found'}), 404
             
-        # Получаем последние метрики хоста
+        # Получаем последние метрики хоста (новая схема: metric_name / metric_value)
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
+        # Получаем последние временные окна
         cursor.execute("""
-            SELECT * FROM aggregated_metrics 
+            SELECT DISTINCT window_start, window_end
+            FROM aggregated_metrics 
             WHERE src_ip = ? 
             ORDER BY window_end DESC 
             LIMIT 10
         """, (ip,))
         
+        windows = cursor.fetchall()
         metrics = []
-        for row in cursor.fetchall():
+        for ws, we in windows:
+            cursor.execute("""
+                SELECT metric_name, metric_value
+                FROM aggregated_metrics
+                WHERE src_ip = ? AND window_start = ?
+            """, (ip, ws))
+            
+            m = {}
+            for name, val in cursor.fetchall():
+                m[name] = val
+            
             metrics.append({
-                'window_end': datetime.fromtimestamp(row[2]).isoformat(),
-                'connections_count': row[3],
-                'unique_ports': row[4],
-                'unique_dst_ips': row[5],
-                'total_bytes': row[6],
-                'avg_packet_size': round(row[7], 2)
+                'window_end': datetime.fromtimestamp(we).isoformat() if we else '',
+                'connections_count': m.get('connections_count', 0),
+                'unique_ports': m.get('unique_ports', 0),
+                'unique_dst_ips': m.get('unique_dst_ips', 0),
+                'total_bytes': m.get('total_bytes', 0),
+                'avg_packet_size': round(m.get('avg_packet_size', 0), 2)
             })
             
         # Получаем последние алерты для хоста
         cursor.execute("""
-            SELECT * FROM alerts 
+            SELECT timestamp, anomaly_type, score, severity, description
+            FROM alerts 
             WHERE src_ip = ? 
             ORDER BY timestamp DESC 
             LIMIT 10
@@ -435,9 +601,11 @@ def get_host_details(ip):
         alerts = []
         for row in cursor.fetchall():
             alerts.append({
-                'timestamp': datetime.fromtimestamp(row[1]).isoformat(),
-                'severity': row[9],
-                'description': row[10]
+                'timestamp': datetime.fromtimestamp(row[0]).isoformat() if row[0] else '',
+                'anomaly_type': row[1],
+                'score': row[2],
+                'severity': row[3],
+                'description': row[4]
             })
             
         conn.close()
@@ -1027,7 +1195,7 @@ def start_web_interface(host='127.0.0.1', port=5000, debug=False, db_path="ids.d
     # Инициализация компонентов
     init_components()
     
-    logger.info(f"Запуск в- за последний часеб-интерфейса на http://{host}:{port}")
+    logger.info(f"Запуск веб-интерфейса на http://{host}:{port}")
     
     # Запуск Flask приложения
     app.run(host=host, port=port, debug=debug)

@@ -591,12 +591,12 @@
                 
                 alertsList.innerHTML = data.alerts.map(alert => `
                     <div class="alert-item ${alert.severity}">
-                        <div class="time">${new Date(alert.timestamp).toLocaleString()}</div>
-                        <div class="ip">${alert.src_ip}</div>
+                        <div class="time">${new Date(alert.timestamp * 1000).toLocaleString()}</div>
+                        <div class="ip">${alert.src_ip} <span style="font-size:11px;color:#999;">[${alert.source || ''}]</span></div>
                         <div class="desc">${alert.description}</div>
                         <div style="margin-top: 5px;">
                             <span class="badge ${alert.severity}">${alert.severity}</span>
-                            Score: ${alert.score}
+                            ${alert.score ? 'Score: ' + (typeof alert.score === 'number' ? alert.score.toFixed(2) : alert.score) : ''}
                         </div>
                     </div>
                 `).join('');
