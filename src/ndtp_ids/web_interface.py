@@ -11,6 +11,7 @@ from typing import Dict, List
 import logging
 
 # Импорты модулей системы
+# Импорты модулей системы
 try:
     from .adaptive_trainer import AdaptiveTrainer
     from .suricata_rules import SuricataRuleParser, DEFAULT_RULES
@@ -19,29 +20,30 @@ try:
 except ImportError:
     # Для запуска как standalone скрипт
     import sys
-    sys.path.insert(0, os.path.dirname(__file__))
-    from adaptive_trainer import AdaptiveTrainer
-    from suricata_rules import SuricataRuleParser, DEFAULT_RULES
-    from suricata_engine import SuricataEngine
-    from anomaly_detector import AnomalyDetector
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from adaptive_trainer import AdaptiveTrainer  # type: ignore
+    from suricata_rules import SuricataRuleParser, DEFAULT_RULES  # type: ignore
+    from suricata_engine import SuricataEngine  # type: ignore
+    from anomaly_detector import AnomalyDetector  # type: ignore
 
-# Опциональные модули ML (работают и без scikit-learn)
+# Опциональные м��дули ML (работают и без scikit-learn)
 try:
-    from ndtp_ids.ml_detector import MLAnomalyDetector
+    from .ml_detector import MLAnomalyDetector
     ML_AVAILABLE = True
 except ImportError:
     try:
-        from ml_detector import MLAnomalyDetector
+        from ml_detector import MLAnomalyDetector  # type: ignore
         ML_AVAILABLE = True
     except ImportError:
         ML_AVAILABLE = False
 
 try:
-    from ndtp_ids.hybrid_scorer import HybridScorer
+    from .hybrid_scorer import HybridScorer
     HYBRID_AVAILABLE = True
 except ImportError:
     try:
-        from hybrid_scorer import HybridScorer
+        from hybrid_scorer import HybridScorer  # type: ignore
         HYBRID_AVAILABLE = True
     except ImportError:
         HYBRID_AVAILABLE = False
