@@ -3,8 +3,9 @@
 Исправление структуры таблицы host_profiles
 """
 import sqlite3
+import time
 
-DB_PATH = "ndtp_ids.db"
+DB_PATH = "ids.db"
 
 def fix_host_profiles_table():
     """Пересоздаем host_profiles с правильной структурой"""
@@ -98,7 +99,7 @@ def fix_host_profiles_table():
             metrics.get('total_bytes', 0.0),
             metrics.get('avg_packet_size', 0.0),
             total_samples,
-            0.0  # last_updated
+            time.time()  # last_updated — текущее время
         ))
     
     conn.commit()

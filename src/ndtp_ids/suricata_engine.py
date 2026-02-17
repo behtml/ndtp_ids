@@ -512,6 +512,7 @@ class SuricataEngine:
     
     def _save_alert(self, alert: Dict):
         """Сохранение алерта Suricata в БД"""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -533,9 +534,11 @@ class SuricataEngine:
                 alert['severity']
             ))
             conn.commit()
-            conn.close()
         except Exception as e:
             print(f"[SuricataEngine] Error saving alert: {e}", file=sys.stderr)
+        finally:
+            if conn:
+                conn.close()
     
     # ==================== Получение алертов ====================
     
@@ -543,29 +546,31 @@ class SuricataEngine:
                          src_ip: str = None) -> List[Dict]:
         """Получение последних алертов Suricata"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        query = 'SELECT id, timestamp, sid, src_ip, src_port, dst_ip, dst_port, protocol, action, msg, severity, resolved FROM suricata_alerts'
-        conditions = []
-        params = []
-        
-        if severity:
-            conditions.append('severity = ?')
-            params.append(severity)
-        if src_ip:
-            conditions.append('src_ip = ?')
-            params.append(src_ip)
-        
-        if conditions:
-            query += ' WHERE ' + ' AND '.join(conditions)
-        
-        query += ' ORDER BY timestamp DESC LIMIT ?'
-        params.append(limit)
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-        
+        try:
+            cursor = conn.cursor()
+
+            query = 'SELECT id, timestamp, sid, src_ip, src_port, dst_ip, dst_port, protocol, action, msg, severity, resolved FROM suricata_alerts'
+            conditions = []
+            params = []
+
+            if severity:
+                conditions.append('severity = ?')
+                params.append(severity)
+            if src_ip:
+                conditions.append('src_ip = ?')
+                params.append(src_ip)
+
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+
+            query += ' ORDER BY timestamp DESC LIMIT ?'
+            params.append(limit)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
         return [{
             'id': r[0],
             'timestamp': r[1],
@@ -584,29 +589,30 @@ class SuricataEngine:
     def get_alerts_stats(self) -> Dict:
         """Статистика алертов для дашборда"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM suricata_alerts')
-        total = cursor.fetchone()[0]
-        
-        one_hour_ago = datetime.now().timestamp() - 3600
-        cursor.execute('SELECT COUNT(*) FROM suricata_alerts WHERE timestamp > ?', (one_hour_ago,))
-        last_hour = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT severity, COUNT(*) FROM suricata_alerts
-            GROUP BY severity
-        ''')
-        by_severity = {r[0]: r[1] for r in cursor.fetchall()}
-        
-        cursor.execute('''
-            SELECT sid, msg, COUNT(*) as cnt FROM suricata_alerts
-            GROUP BY sid ORDER BY cnt DESC LIMIT 5
-        ''')
-        top_rules = [{'sid': r[0], 'msg': r[1], 'count': r[2]} for r in cursor.fetchall()]
-        
-        conn.close()
-        
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT COUNT(*) FROM suricata_alerts')
+            total = cursor.fetchone()[0]
+
+            one_hour_ago = datetime.now().timestamp() - 3600
+            cursor.execute('SELECT COUNT(*) FROM suricata_alerts WHERE timestamp > ?', (one_hour_ago,))
+            last_hour = cursor.fetchone()[0]
+
+            cursor.execute('''
+                SELECT severity, COUNT(*) FROM suricata_alerts
+                GROUP BY severity
+            ''')
+            by_severity = {r[0]: r[1] for r in cursor.fetchall()}
+
+            cursor.execute('''
+                SELECT sid, msg, COUNT(*) as cnt FROM suricata_alerts
+                GROUP BY sid ORDER BY cnt DESC LIMIT 5
+            ''')
+            top_rules = [{'sid': r[0], 'msg': r[1], 'count': r[2]} for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
         return {
             'total': total,
             'last_hour': last_hour,

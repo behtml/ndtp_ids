@@ -2,21 +2,198 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IDS - Хосты</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 { font-size: 28px; margin-bottom: 5px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+        .nav {
+            background: white;
+            padding: 15px 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            margin-right: 25px;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        .nav a:hover { color: #764ba2; }
+        .nav a.active { color: #764ba2; border-bottom: 2px solid #764ba2; padding-bottom: 4px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px 20px; }
+        .host-card {
+            background: white;
+            padding: 20px;
+            margin: 12px 0;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .host-info { flex: 1; min-width: 200px; }
+        .host-ip { font-size: 18px; font-weight: 700; color: #333; }
+        .host-meta { font-size: 13px; color: #888; margin-top: 4px; }
+        .host-stats {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .stat-item {
+            text-align: center;
+            min-width: 80px;
+        }
+        .stat-value { font-size: 16px; font-weight: 700; color: #667eea; }
+        .stat-label { font-size: 11px; color: #999; margin-top: 2px; }
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-learning { background: #fff3cd; color: #856404; }
+        .badge-detection { background: #d4edda; color: #155724; }
+        .host-actions { display: flex; gap: 8px; }
+        .btn {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-learn { background: #ffc107; color: #333; }
+        .btn-detect { background: #28a745; color: white; }
+        .btn-reset { background: #dc3545; color: white; }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+            font-size: 16px;
+        }
+        .error-msg { color: #dc3545; text-align: center; padding: 20px; }
+    </style>
 </head>
-<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5;">
-    <h1>Список отслеживаемых хостов</h1>
-    <a href="/">← Назад</a>
-    <div id="hosts-list" style="margin-top: 20px;"></div>
+<body>
+    <div class="header">
+        <h1>🖥️ Хосты</h1>
+        <p>Список отслеживаемых устройств и их профили</p>
+    </div>
+    <div class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/monitoring">Мониторинг</a>
+        <a href="/hosts" class="active">Хосты</a>
+        <a href="/alerts">Алерты</a>
+        <a href="/rules">Правила Suricata</a>
+        <a href="/training">Обучение</a>
+        <a href="/hybrid">Гибридный анализ</a>
+    </div>
+    <div class="container">
+        <div id="hosts-list">
+            <div class="empty-state">Загрузка...</div>
+        </div>
+    </div>
+
     <script>
-        fetch('/api/hosts').then(r => r.json()).then(data => {
-            document.getElementById('hosts-list').innerHTML = data.hosts.map(h => 
-                `<div style="background: white; padding: 15px; margin: 10px 0; border-radius: 5px;">
-                    <strong>${h.src_ip}</strong> - ${h.is_learning ? 'Обучение' : 'Детекция'} 
-                    (${h.samples_count} наблюдений)
-                </div>`
-            ).join('');
-        });
+        function loadHosts() {
+            fetch('/api/hosts')
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('hosts-list');
+                    if (!data.hosts || data.hosts.length === 0) {
+                        container.innerHTML = '<div class="empty-state">Нет отслеживаемых хостов. Запустите коллектор для захвата трафика.</div>';
+                        return;
+                    }
+                    container.innerHTML = data.hosts.map(h => {
+                        const isLearning = h.is_learning;
+                        const badgeClass = isLearning ? 'badge-learning' : 'badge-detection';
+                        const badgeText = isLearning ? '🟡 Обучение' : '🟢 Детекция';
+                        const lastUpdated = h.last_updated ? new Date(h.last_updated).toLocaleString('ru-RU') : '—';
+                        return `
+                        <div class="host-card">
+                            <div class="host-info">
+                                <div class="host-ip">${escapeHtml(h.src_ip)}</div>
+                                <div class="host-meta">Обновлено: ${lastUpdated} · Наблюдений: ${h.samples_count || 0}</div>
+                            </div>
+                            <div class="host-stats">
+                                <div class="stat-item">
+                                    <div class="stat-value">${(h.connections_mean || 0).toFixed(1)}</div>
+                                    <div class="stat-label">Соединений</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="stat-value">${(h.unique_ports_mean || 0).toFixed(1)}</div>
+                                    <div class="stat-label">Портов</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="stat-value">${(h.total_bytes_mean || 0).toFixed(0)}</div>
+                                    <div class="stat-label">Байт (сред.)</div>
+                                </div>
+                            </div>
+                            <span class="badge ${badgeClass}">${badgeText}</span>
+                            <div class="host-actions">
+                                ${isLearning
+                                    ? `<button class="btn btn-detect" onclick="setMode('${escapeHtml(h.src_ip)}', false)">→ Детекция</button>`
+                                    : `<button class="btn btn-learn" onclick="setMode('${escapeHtml(h.src_ip)}', true)">→ Обучение</button>`
+                                }
+                                <button class="btn btn-reset" onclick="resetHost('${escapeHtml(h.src_ip)}')">Сброс</button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                })
+                .catch(err => {
+                    document.getElementById('hosts-list').innerHTML =
+                        '<div class="error-msg">Ошибка загрузки хостов: ' + escapeHtml(err.message) + '</div>';
+                });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function setMode(ip, enabled) {
+            fetch(`/api/host/${ip}/learning`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: enabled})
+            })
+            .then(r => r.json())
+            .then(() => loadHosts())
+            .catch(err => alert('Ошибка: ' + err.message));
+        }
+
+        function resetHost(ip) {
+            if (!confirm(`Сбросить профиль хоста ${ip}?`)) return;
+            fetch(`/api/host/${ip}/reset`, { method: 'POST' })
+                .then(r => r.json())
+                .then(() => loadHosts())
+                .catch(err => alert('Ошибка: ' + err.message));
+        }
+
+        loadHosts();
+        setInterval(loadHosts, 15000);
     </script>
 </body>
 </html>

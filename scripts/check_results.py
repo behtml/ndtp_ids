@@ -16,7 +16,6 @@ import os
 import sys
 import sqlite3
 import argparse
-from collections import Counter
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -109,6 +108,7 @@ def check_results(db_path: str = "ids.db"):
     try:
         cursor.execute("SELECT COUNT(*) FROM suricata_alerts")
         total_sur = cursor.fetchone()[0]
+        total_all_alerts += total_sur
 
         cursor.execute("""
             SELECT msg, COUNT(*), severity

@@ -41,7 +41,7 @@ def example_2_collector_with_aggregator():
     """
     print_header("Пример 2: Коллектор + Агрегатор")
     print("Запускаем коллектор с передачей данных в агрегатор...")
-    print("События будут агрегироваться в БД ndtp_ids.db")
+    print("События будут агрегироваться в БД ids.db")
     print("Нажмите Ctrl+C для остановки")
     print()
     
@@ -119,7 +119,7 @@ def example_4_view_statistics():
     
     import sqlite3
     
-    db_path = "ndtp_ids.db"
+    db_path = "ids.db"
     
     try:
         conn = sqlite3.connect(db_path)

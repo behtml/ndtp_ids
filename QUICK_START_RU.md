@@ -46,8 +46,8 @@ python examples/demo.py
 # Выбрать пункт 4
 
 # Через SQL напрямую
-sqlite3 ndtp_ids.db "SELECT * FROM aggregated_metrics LIMIT 10;"
-sqlite3 ndtp_ids.db "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT 5;"
+sqlite3 ids.db "SELECT * FROM aggregated_metrics LIMIT 10;"
+sqlite3 ids.db "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT 5;"
 ```
 
 ### Через Python
